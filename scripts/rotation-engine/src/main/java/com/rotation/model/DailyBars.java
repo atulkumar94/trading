@@ -1,0 +1,248 @@
+package com.rotation.model;
+
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.TreeSet;
+
+/**
+ * Aligned daily open/close matrices across the whole universe.
+ *
+ * <p>Rows are trading dates (union of all symbols, ascending); columns are
+ * symbols (alphabetical). Missing observations are {@link Double#NaN}. The
+ * {@code eligibility} matrix holds the cumulative count of non-null closes for
+ * each symbol up to and including each date, which drives the minimum-history
+ * gate in the engine.
+ */
+public final class DailyBars {
+
+    private final List<LocalDate> dates;
+    private final List<String> symbols;
+    private final Map<String, Integer> symbolIndex;
+    private final double[][] opens;   // [dateIdx][symbolIdx]
+    private final double[][] highs;   // [dateIdx][symbolIdx]
+    private final double[][] lows;    // [dateIdx][symbolIdx]
+    private final double[][] closes;  // [dateIdx][symbolIdx]
+    private final int[][] eligibility; // [dateIdx][symbolIdx]
+
+    private DailyBars(List<LocalDate> dates, List<String> symbols, Map<String, Integer> symbolIndex,
+                      double[][] opens, double[][] highs, double[][] lows, double[][] closes, int[][] eligibility) {
+        this.dates = dates;
+        this.symbols = symbols;
+        this.symbolIndex = symbolIndex;
+        this.opens = opens;
+        this.highs = highs;
+        this.lows = lows;
+        this.closes = closes;
+        this.eligibility = eligibility;
+    }
+
+    /**
+     * Build aligned matrices from per-symbol daily candles.
+     *
+     * @param seriesList  candles per symbol
+     * @param forwardFill when true, forward-fill gaps down each column (used for
+     *                    minute-history input where a symbol may skip a session);
+     *                    tick input is left with genuine NaN gaps.
+     */
+    public static DailyBars build(List<SymbolDailyCandles> seriesList, boolean forwardFill) {
+        TreeSet<LocalDate> dateSet = new TreeSet<>();
+        TreeSet<String> symbolSet = new TreeSet<>();
+        for (SymbolDailyCandles series : seriesList) {
+            if (series.candles().isEmpty()) {
+                continue;
+            }
+            symbolSet.add(series.symbol());
+            for (DailyCandle candle : series.candles()) {
+                dateSet.add(candle.date());
+            }
+        }
+        if (dateSet.isEmpty() || symbolSet.isEmpty()) {
+            throw new IllegalArgumentException("No usable daily bars were produced from the input data.");
+        }
+
+        List<LocalDate> dates = new ArrayList<>(dateSet);
+        List<String> symbols = new ArrayList<>(symbolSet);
+        Map<LocalDate, Integer> dateIndex = new HashMap<>();
+        for (int i = 0; i < dates.size(); i++) {
+            dateIndex.put(dates.get(i), i);
+        }
+        Map<String, Integer> symbolIndex = new HashMap<>();
+        for (int j = 0; j < symbols.size(); j++) {
+            symbolIndex.put(symbols.get(j), j);
+        }
+
+        int rows = dates.size();
+        int cols = symbols.size();
+        double[][] opens = new double[rows][cols];
+        double[][] highs = new double[rows][cols];
+        double[][] lows = new double[rows][cols];
+        double[][] closes = new double[rows][cols];
+        for (double[] row : opens) {
+            java.util.Arrays.fill(row, Double.NaN);
+        }
+        for (double[] row : highs) {
+            java.util.Arrays.fill(row, Double.NaN);
+        }
+        for (double[] row : lows) {
+            java.util.Arrays.fill(row, Double.NaN);
+        }
+        for (double[] row : closes) {
+            java.util.Arrays.fill(row, Double.NaN);
+        }
+
+        for (SymbolDailyCandles series : seriesList) {
+            Integer col = symbolIndex.get(series.symbol());
+            if (col == null) {
+                continue;
+            }
+            for (DailyCandle candle : series.candles()) {
+                Integer row = dateIndex.get(candle.date());
+                if (row == null) {
+                    continue;
+                }
+                opens[row][col] = candle.open();
+                highs[row][col] = candle.high();
+                lows[row][col] = candle.low();
+                closes[row][col] = candle.close();
+            }
+        }
+
+        if (forwardFill) {
+            forwardFill(opens);
+            forwardFill(highs);
+            forwardFill(lows);
+            forwardFill(closes);
+        }
+
+        int[][] eligibility = new int[rows][cols];
+        for (int j = 0; j < cols; j++) {
+            int running = 0;
+            for (int i = 0; i < rows; i++) {
+                if (!Double.isNaN(closes[i][j])) {
+                    running++;
+                }
+                eligibility[i][j] = running;
+            }
+        }
+
+        return new DailyBars(dates, symbols, symbolIndex, opens, highs, lows, closes, eligibility);
+    }
+
+    private static void forwardFill(double[][] matrix) {
+        int rows = matrix.length;
+        int cols = rows == 0 ? 0 : matrix[0].length;
+        for (int j = 0; j < cols; j++) {
+            double last = Double.NaN;
+            for (int i = 0; i < rows; i++) {
+                if (Double.isNaN(matrix[i][j])) {
+                    if (!Double.isNaN(last)) {
+                        matrix[i][j] = last;
+                    }
+                } else {
+                    last = matrix[i][j];
+                }
+            }
+        }
+    }
+
+    /** Return a copy filtered to the given symbols (universe restriction). */
+    public DailyBars restrictTo(List<String> requestedSymbols) {
+        List<SymbolDailyCandles> rebuilt = new ArrayList<>();
+        for (String symbol : requestedSymbols) {
+            Integer col = symbolIndex.get(symbol);
+            if (col == null) {
+                continue;
+            }
+            List<DailyCandle> candles = new ArrayList<>();
+            for (int i = 0; i < dates.size(); i++) {
+                double open = opens[i][col];
+                double close = closes[i][col];
+                if (Double.isNaN(open) && Double.isNaN(close)) {
+                    continue;
+                }
+                candles.add(new DailyCandle(dates.get(i), open, open, open, close, 0.0));
+            }
+            rebuilt.add(new SymbolDailyCandles(symbol, candles));
+        }
+        if (rebuilt.isEmpty()) {
+            throw new IllegalArgumentException("None of the requested symbols are present in the data source.");
+        }
+        return build(rebuilt, false);
+    }
+
+    public DailyBars filterFrom(LocalDate startDate) {
+        if (startDate == null) {
+            return this;
+        }
+        List<LocalDate> filteredDates = new ArrayList<>();
+        for (LocalDate date : dates) {
+            if (!date.isBefore(startDate)) {
+                filteredDates.add(date);
+            }
+        }
+        if (filteredDates.isEmpty()) {
+            throw new IllegalArgumentException("No data available on/after start date: " + startDate);
+        }
+
+        int startIdx = dates.indexOf(filteredDates.get(0));
+        int rows = filteredDates.size();
+        int cols = symbols.size();
+        double[][] opens = new double[rows][cols];
+        double[][] highs = new double[rows][cols];
+        double[][] lows = new double[rows][cols];
+        double[][] closes = new double[rows][cols];
+        int[][] eligibility = new int[rows][cols];
+
+        for (int i = 0; i < rows; i++) {
+            for (int j = 0; j < cols; j++) {
+                int sourceIdx = startIdx + i;
+                opens[i][j] = this.opens[sourceIdx][j];
+                highs[i][j] = this.highs[sourceIdx][j];
+                lows[i][j] = this.lows[sourceIdx][j];
+                closes[i][j] = this.closes[sourceIdx][j];
+                eligibility[i][j] = this.eligibility[sourceIdx][j];
+            }
+        }
+
+        return new DailyBars(filteredDates, new ArrayList<>(symbols), new HashMap<>(symbolIndex), opens, highs, lows, closes, eligibility);
+    }
+
+    public List<LocalDate> dates() {
+        return dates;
+    }
+
+    public List<String> symbols() {
+        return symbols;
+    }
+
+    public int symbolCount() {
+        return symbols.size();
+    }
+
+    public int dateCount() {
+        return dates.size();
+    }
+
+    public double openAt(int dateIdx, int symbolIdx) {
+        return opens[dateIdx][symbolIdx];
+    }
+
+    public double highAt(int dateIdx, int symbolIdx) {
+        return highs[dateIdx][symbolIdx];
+    }
+
+    public double lowAt(int dateIdx, int symbolIdx) {
+        return lows[dateIdx][symbolIdx];
+    }
+
+    public double closeAt(int dateIdx, int symbolIdx) {
+        return closes[dateIdx][symbolIdx];
+    }
+
+    public int eligibilityAt(int dateIdx, int symbolIdx) {
+        return eligibility[dateIdx][symbolIdx];
+    }
+}
