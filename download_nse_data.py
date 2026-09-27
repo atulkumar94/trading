@@ -46,6 +46,9 @@ except ImportError:
     )
 
 
+DEFAULT_OUTDIR = Path(__file__).resolve().parent / "stocks" / "daily"
+
+
 def load_symbols(csv_path: str) -> list[str]:
     """Read the first column of the CSV (header row skipped) as symbols."""
     df = pd.read_csv(csv_path)
@@ -112,12 +115,12 @@ def download_symbol(symbol: str, start: str, end: Optional[str], outdir: Path) -
 def main():
     parser = argparse.ArgumentParser(description="Bulk-download NSE daily OHLC data via yfinance.")
     parser.add_argument("csv_path", help="Path to CSV file with a header row and NSE stock codes.")
-    parser.add_argument("--start", default="2015-01-01", help="Start date, YYYY-MM-DD (default: 2020-01-01)")
+    parser.add_argument("--start", default="2005-01-01", help="Start date, YYYY-MM-DD (default: 2020-01-01)")
     parser.add_argument("--end", default=None, help="End date, YYYY-MM-DD (default: today)")
     parser.add_argument(
         "--outdir",
-        default="/Users/kumaratl/Downloads/chDownloads/stocksData/stocks/daily",
-        help="Output folder for CSVs (default: /Users/kumaratl/Downloads/chDownloads/stocksData/stocks/daily)",
+        default=str(DEFAULT_OUTDIR),
+        help=f"Output folder for CSVs (default: {DEFAULT_OUTDIR})",
     )
     parser.add_argument("--sleep", type=float, default=0.4, help="Seconds to wait between downloads (default: 0.4)")
     parser.add_argument(

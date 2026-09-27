@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "468a5e29-4517-47db-ba51-888ae3e91582",
+  "status": "current",
+  "command": "deliver",
+  "type": "architecture",
+  "input": "/Users/kumaratl/Downloads/chDownloads/stocksData/.archify/stocks-pipeline-20261001-000000/candidate.json",
+  "output": "/Users/kumaratl/Downloads/chDownloads/stocksData/.archify/stocks-pipeline-20261001-000000/stocks-pipeline.html",
+  "specification": {
+    "sha256": "f32879cbc6c510b61b7a18dc0ee907d06b0166bb145c568e2843739f2ff2275f",
+    "bytes": 6542
+  },
+  "artifact": {
+    "sha256": "c1926d2d355b198af9de52a6d1a21895a728f10c091dcfcaa920c1dbcadffa5b",
+    "bytes": 772926
+  }
+}

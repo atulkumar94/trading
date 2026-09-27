@@ -1,0 +1,252 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Stocks Data Pipeline — NSE Download & Rotation Backtest",
+    "subtitle": "Data flow: yfinance → daily OHLCV → market snapshots → momentum strategy backtest → CSV reports",
+    "output": "stocks-pipeline.html",
+    "quality_profile": "showcase"
+  },
+  "components": [
+    {
+      "id": "symbols-input",
+      "type": "external",
+      "label": "symbols.csv",
+      "sublabel": "NSE symbols + sectors",
+      "pos": [40, 120],
+      "size": [130, 60]
+    },
+    {
+      "id": "yfinance",
+      "type": "external",
+      "label": "Yahoo Finance API",
+      "sublabel": "yfinance library",
+      "pos": [40, 250],
+      "size": [130, 60],
+      "tag": "external data"
+    },
+    {
+      "id": "python-downloader",
+      "type": "backend",
+      "label": "download_nse_data.py",
+      "sublabel": "Fetch daily OHLCV",
+      "pos": [250, 180],
+      "size": [160, 60],
+      "tag": "Python"
+    },
+    {
+      "id": "daily-storage",
+      "type": "database",
+      "label": "stocks/daily/",
+      "sublabel": "One CSV per symbol",
+      "pos": [500, 180],
+      "size": [140, 60],
+      "tag": "Local FS"
+    },
+    {
+      "id": "rotation-config",
+      "type": "security",
+      "label": "rotation.properties",
+      "sublabel": "Engine configuration",
+      "pos": [500, 40],
+      "size": [140, 60],
+      "tag": "Config"
+    },
+    {
+      "id": "java-loaders",
+      "type": "backend",
+      "label": "Data Loaders",
+      "sublabel": "MinuteHistory + Snapshot",
+      "pos": [750, 180],
+      "size": [160, 60],
+      "tag": "Java"
+    },
+    {
+      "id": "snapshot-exporter",
+      "type": "backend",
+      "label": "MarketSnapshotExporter",
+      "sublabel": "Normalize → single source",
+      "pos": [1000, 180],
+      "size": [170, 60],
+      "tag": "Java"
+    },
+    {
+      "id": "snapshot-csv",
+      "type": "database",
+      "label": "rotation_daily_snapshot.csv",
+      "sublabel": "Source of truth",
+      "pos": [1250, 180],
+      "size": [200, 60],
+      "tag": "Golden data"
+    },
+    {
+      "id": "rotation-engine",
+      "type": "backend",
+      "label": "RotationEngine",
+      "sublabel": "Momentum strategy logic",
+      "pos": [1000, 350],
+      "size": [170, 60],
+      "tag": "Java"
+    },
+    {
+      "id": "csv-exporters",
+      "type": "backend",
+      "label": "CSV Exporters",
+      "sublabel": "9 report types",
+      "pos": [1250, 350],
+      "size": [160, 60],
+      "tag": "Java"
+    },
+    {
+      "id": "output-reports",
+      "type": "database",
+      "label": "output/rotation/",
+      "sublabel": "9 report CSVs",
+      "pos": [1500, 350],
+      "size": [160, 60],
+      "tag": "Reports"
+    },
+    {
+      "id": "monthly-snapshot",
+      "type": "database",
+      "label": "rotation_monthly_snapshot.csv",
+      "sublabel": "Monthly aggregates",
+      "pos": [1250, 500],
+      "size": [200, 60],
+      "tag": "Derived"
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "External Data Source",
+      "wraps": ["yfinance", "symbols-input"]
+    },
+    {
+      "kind": "region",
+      "label": "Local File System",
+      "wraps": ["daily-storage", "snapshot-csv", "monthly-snapshot", "output-reports"]
+    },
+    {
+      "kind": "region",
+      "label": "Java Rotation Engine (rotation-engine/)",
+      "wraps": ["rotation-config", "java-loaders", "snapshot-exporter", "rotation-engine", "csv-exporters"]
+    }
+  ],
+  "connections": [
+    {
+      "id": "input-to-downloader",
+      "from": "symbols-input",
+      "to": "python-downloader",
+      "label": "read",
+      "variant": "emphasis"
+    },
+    {
+      "id": "api-to-downloader",
+      "from": "yfinance",
+      "to": "python-downloader",
+      "label": "fetch OHLCV",
+      "variant": "emphasis"
+    },
+    {
+      "id": "downloader-to-storage",
+      "from": "python-downloader",
+      "to": "daily-storage",
+      "label": "write CSV",
+      "variant": "emphasis"
+    },
+    {
+      "id": "config-to-loaders",
+      "from": "rotation-config",
+      "to": "java-loaders",
+      "label": "settings",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "storage-to-loaders",
+      "from": "daily-storage",
+      "to": "java-loaders",
+      "label": "load"
+    },
+    {
+      "id": "loaders-to-exporter",
+      "from": "java-loaders",
+      "to": "snapshot-exporter",
+      "label": "DailyBars"
+    },
+    {
+      "id": "exporter-to-snapshot",
+      "from": "snapshot-exporter",
+      "to": "snapshot-csv",
+      "label": "write"
+    },
+    {
+      "id": "snapshot-to-engine",
+      "from": "snapshot-csv",
+      "to": "rotation-engine",
+      "label": "reload + filter",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "snapshot-to-monthly",
+      "from": "snapshot-csv",
+      "to": "monthly-snapshot",
+      "label": "aggregate",
+      "fromSide": "right",
+      "toSide": "top",
+      "variant": "dashed"
+    },
+    {
+      "id": "engine-to-exporters",
+      "from": "rotation-engine",
+      "to": "csv-exporters",
+      "label": "BacktestResult"
+    },
+    {
+      "id": "exporters-to-output",
+      "from": "csv-exporters",
+      "to": "output-reports",
+      "label": "write"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Data Download",
+      "items": [
+        "symbols.csv: input universe with sector tags",
+        "download_nse_data.py: calls yfinance with date range",
+        "stocks/daily/: one CSV per symbol (gitignored)"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Configuration & Filtering",
+      "items": [
+        "rotation.properties: lookback.days, top.n, rebalance.mode, etc.",
+        "Date window: start.date / end.date applied by loaders",
+        "Sector constraints: sector.file + max.per.sector diversification"
+      ]
+    },
+    {
+      "dot": "orange",
+      "title": "Snapshot Generation",
+      "items": [
+        "Market snapshot: single source of truth across all runs",
+        "MinuteHistoryDailyBarLoader: reads daily CSVs into DailyBars model",
+        "SnapshotDailyBarLoader: reloads snapshot for reload + filter step"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Rotation Strategy & Reports",
+      "items": [
+        "Momentum ranking: lookback.days trading sessions",
+        "Entry/exit logic: top.n symbols, rank threshold, stop loss",
+        "9 CSV outputs: equity curve, tradebook, holdings, performance, rebalances, lookback, yearly, monthly snapshot"
+      ]
+    }
+  ]
+}
