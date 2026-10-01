@@ -4,3 +4,4 @@ rotation-engine/target/
 rotation-engine/.copy.log
 .agents/
 .claude/
+.archify/
