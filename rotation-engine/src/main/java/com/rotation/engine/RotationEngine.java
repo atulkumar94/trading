@@ -3,10 +3,12 @@ package com.rotation.engine;
 import com.rotation.config.RotationConfig;
 import com.rotation.model.BacktestResult;
 import com.rotation.model.DailyBars;
+import com.rotation.model.DailyMark;
 import com.rotation.model.EntryDetail;
 import com.rotation.model.EquityRow;
 import com.rotation.model.ExitDetail;
 import com.rotation.model.HoldingsRow;
+import com.rotation.model.LedgerFill;
 import com.rotation.model.LookbackRow;
 import com.rotation.model.PerformanceRow;
 import com.rotation.model.RebalanceRecord;
@@ -21,6 +23,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
 import java.time.YearMonth;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -73,19 +76,23 @@ public final class RotationEngine {
             throw new IllegalArgumentException("Not enough history to run the requested lookback window.");
         }
 
-        // Configurable calendar schedule (rebalance.mode): first trading day of
-        // month, first trading day of week, or the 1st & 11th trading day of the
-        // month. Each decision is ranked on the prior session's close and executed
-        // at that day's open, so switches happen before the day trades.
+        // The bars carry the full history; sessions before start.date are warm-up
+        // only (lookback ranking + min-history eligibility) and are never traded.
+        int tradeStartIdx = tradeStartIndex(dates, config.startDate());
+
+        // Fixed trading-session cadence (rebalance.mode), anchored on the first session
+        // with a complete lookback. Each decision is ranked on the prior session's close
+        // and executed at the next open, so switches happen before the day trades.
         String scheduleLabel = scheduleLabel(config.rebalanceMode());
-        List<Integer> rebalancePoints = computeRebalanceSignalIndices(dates, config.rebalanceMode());
+        List<Integer> rebalancePoints = computeRebalanceSignalIndices(bars, tradeStartIdx, lookbackDays, minHistory);
         if (rebalancePoints.isEmpty()) {
             throw new IllegalArgumentException("Not enough observations to run the requested rebalance schedule.");
         }
 
         if (verbose) {
-            logger.logRunHeader(bars.symbolCount(), dateCount, dates.get(0), dates.get(dateCount - 1),
-                    topN, lookbackDays, scheduleLabel, minHistory, allocationMode, rebalancePoints.size());
+            logger.logRunHeader(bars.symbolCount(), dateCount - tradeStartIdx, dates.get(tradeStartIdx),
+                    dates.get(dateCount - 1), topN, lookbackDays, scheduleLabel, minHistory, allocationMode,
+                    rebalancePoints.size());
         }
 
         List<RebalanceRecord> records = new ArrayList<>();
@@ -96,6 +103,10 @@ public final class RotationEngine {
         // Post-rebalance portfolio state captured for each period so any calendar
         // date can later be marked to market by replaying stops onto a clone.
         List<PeriodSnapshot> periodSnapshots = new ArrayList<>();
+        // Every position change (incl. held-name re-weights) and the end-of-day book,
+        // so the daily valuation report can replay the run without re-deriving it.
+        List<LedgerFill> fills = new ArrayList<>();
+        List<DailyMark> dailyMarks = new ArrayList<>();
 
         Map<String, Double> holdings = new LinkedHashMap<>(); // symbol -> quantity
         Map<String, Double> entryPrices = new LinkedHashMap<>();
@@ -118,7 +129,8 @@ public final class RotationEngine {
         // Daily driver: walk every trading day in order. A scheduled rebalance fires
         // on its execution day (the session after a signal day) and stop-losses are
         // evaluated on every day's close, filled at the next session's open.
-        for (int day = 0; day < dateCount; day++) {
+        for (int day = tradeStartIdx; day < dateCount; day++) {
+            double contributionToday = 0.0;
             if (day >= 1 && signalIndexSet.contains(day - 1)) {
             int signalIdx = day - 1;
             int referenceIdx = signalIdx - (lookbackDays - 1);
@@ -131,14 +143,18 @@ public final class RotationEngine {
             // calendar month (SIP-style). The cash is credited to account equity
             // immediately (even during a cash period) and held as pending cash
             // until it can be deployed. It is tracked separately from trading P&L.
+            // A session-count cadence can skip a short month, so every calendar
+            // month elapsed since the last rebalance is credited.
             double contribution = 0.0;
             YearMonth executionMonth = YearMonth.from(executionDate);
             if (compound && monthlyContribution > 0.0 && lastContributionMonth != null
                     && !executionMonth.equals(lastContributionMonth)) {
-                contribution = monthlyContribution;
-                pendingContribution += monthlyContribution;
+                contribution = monthlyContribution * lastContributionMonth.until(executionMonth, ChronoUnit.MONTHS);
+                pendingContribution += contribution;
             }
             lastContributionMonth = executionMonth;
+            contributionToday = contribution;
+            int rebalanceNumber = records.size() + 1;
 
             // --- 1. Value the book that survived intra-period stops at the execution
             //        (next) open. Stops were already applied day-by-day by the daily
@@ -160,7 +176,11 @@ public final class RotationEngine {
                 for (Map.Entry<String, Double> entry : holdings.entrySet()) {
                     double price = openAt(bars, executionIdx, entry.getKey());
                     if (Double.isNaN(price)) {
-                        continue; // no execution price -> position drops out
+                        // no execution price -> position drops out (its value is lost)
+                        fills.add(new LedgerFill(executionDate, signalDate, rebalanceNumber, LedgerFill.DROP,
+                                entry.getKey(), entry.getValue(), 0.0,
+                                "No open price on execution day; position written off at zero"));
+                        continue;
                     }
                     valued.put(entry.getKey(), entry.getValue());
                     value += entry.getValue() * price;
@@ -187,8 +207,13 @@ public final class RotationEngine {
             List<Candidate> ranked = rankUniverse(bars, signalIdx, referenceIdx, minHistory);
             List<String> selected = selectHoldings(ranked, holdings.keySet(), topN, exitN);
             TreeSet<String> selectedSet = new TreeSet<>(selected);
+            Map<String, Integer> rankBySymbol = new HashMap<>();
+            for (int i = 0; i < ranked.size(); i++) {
+                rankBySymbol.put(ranked.get(i).symbol, i + 1);
+            }
+            // The sector-capped top-N cut (always entered); anything else selected is an exit buffer hold.
+            HashSet<String> topNSelection = new HashSet<>(selectTopN(ranked, topN));
 
-            int rebalanceNumber = records.size() + 1;
             List<PerformanceRow> performanceTable = new ArrayList<>();
             LocalDate lookbackStart = referenceIdx >= 0 ? dates.get(referenceIdx) : null;
             for (int i = 0; i < ranked.size(); i++) {
@@ -323,6 +348,9 @@ public final class RotationEngine {
                         detail.quantity, detail.exitPrice, detail.exitValue, detail.entryPrice,
                         detail.exitPrice, detail.realizedPnl, round2(before), round2(runningCash),
                         signalDate, rebalanceNumber));
+                fills.add(new LedgerFill(executionDate, signalDate, rebalanceNumber, LedgerFill.EXIT,
+                        detail.symbol, detail.quantity, detail.exitPrice,
+                        exitReason(rankBySymbol.get(detail.symbol), ranked.size(), exitN)));
             }
             // (2) Re-weight held positions (no separate row): net cash impact only.
             double heldNetValue = 0.0;
@@ -335,6 +363,15 @@ public final class RotationEngine {
                 Double newQty = holdings.get(symbol);
                 heldNetValue += (newQty != null ? newQty : 0.0) * price;
                 heldNetValue -= (oldQty != null ? oldQty : 0.0) * price;
+                double delta = (newQty != null ? newQty : 0.0) - (oldQty != null ? oldQty : 0.0);
+                if (delta != 0.0) {
+                    Integer rank = rankBySymbol.get(symbol);
+                    fills.add(new LedgerFill(executionDate, signalDate, rebalanceNumber,
+                            delta > 0 ? LedgerFill.ADD : LedgerFill.TRIM, symbol, Math.abs(delta), price,
+                            "Re-sized to target allocation (rank " + rank + " of " + ranked.size()
+                                    + (topNSelection.contains(symbol) ? ", in top.n selection)"
+                                            : ", retained in exit buffer)")));
+                }
             }
             runningCash -= heldNetValue;
             // (3) ENTRYs debit their cost from cash.
@@ -351,6 +388,10 @@ public final class RotationEngine {
                 tradebookRows.add(new TradebookRow(executionDate, "ENTRY", symbol, newQty, price,
                         tradeValue, price, null, null, round2(before), round2(runningCash),
                         signalDate, rebalanceNumber));
+                fills.add(new LedgerFill(executionDate, signalDate, rebalanceNumber, LedgerFill.ENTRY,
+                        symbol, newQty, price,
+                        "Entered: rank " + rankBySymbol.get(symbol) + " of " + ranked.size() + " (top.n=" + topN
+                                + (rankBySymbol.get(symbol) > topN ? ", higher-ranked names skipped by sector cap)" : ")")));
                 entryPrices.put(symbol, price);
             }
 
@@ -397,11 +438,26 @@ public final class RotationEngine {
             periodRealizedStopPnl = 0.0;
             }
 
+            // End-of-day mark: the book after this session's open executions (rebalance
+            // and stops filled at this open), valued at this close with the engine's
+            // mark-to-market formula. Stops triggered by this close fill at the next
+            // open, so they are applied only after the mark.
+            double markValue = 0.0;
+            for (Map.Entry<String, Double> h : holdings.entrySet()) {
+                double close = closeAt(bars, day, h.getKey());
+                if (!Double.isNaN(close)) {
+                    markValue += h.getValue() * close;
+                }
+            }
+            dailyMarks.add(new DailyMark(dates.get(day),
+                    accountEquity + (markValue - deployedCapital) + periodRealizedStopPnl,
+                    contributionToday, currentHoldingsRebalanceNumber, holdings));
+
             // Daily stop-loss / trailing-stop check on the current book: a breach on
             // this day's close exits at the next session's open, on any calendar day.
             if (!holdings.isEmpty()) {
                 StopResult sr = applyStops(bars, day, day, dates, holdings, stopBasis, peakPrices,
-                        entryPrices, currentHoldingsRebalanceNumber, cash, tradebookRows);
+                        entryPrices, currentHoldingsRebalanceNumber, cash, tradebookRows, fills);
                 cash = sr.cash;
                 deployedCapital -= sr.basisRemoved;
                 periodRealizedStopPnl += sr.realizedPnl;
@@ -442,11 +498,23 @@ public final class RotationEngine {
                     round2(markEquity), round2(markPeriodReturnPct), round2(markCumulativeReturnPct)));
         }
 
-        List<YearEndEquity> yearEndMarks = buildYearEndMarks(bars, dates, periodSnapshots, initialCapital);
+        List<YearEndEquity> yearEndMarks = buildYearEndMarks(bars, dates, tradeStartIdx, periodSnapshots,
+                initialCapital);
 
         List<LookbackRow> lookbackRows = buildLookbackRows(bars, lookbackDays, minHistory, topN);
         return new BacktestResult(records, equityRows, performanceRows, tradebookRows, lookbackRows,
-                holdingsRows, yearEndMarks, initialCapital);
+                holdingsRows, yearEndMarks, initialCapital, fills, dailyMarks);
+    }
+
+    private static String exitReason(Integer rank, int rankedCount, int exitN) {
+        if (rank == null) {
+            return "Ineligible at signal (missing close or insufficient history)";
+        }
+        if (rank > exitN) {
+            return "Rank " + rank + " of " + rankedCount + ", below exit rank " + exitN;
+        }
+        return "Rank " + rank + " of " + rankedCount + ", within exit rank " + exitN
+                + " but not reselected (sector cap or book capacity)";
     }
 
     /**
@@ -458,14 +526,14 @@ public final class RotationEngine {
      * yearly report strike returns at the true year boundary instead of at whichever
      * rebalance date sat nearest to it.
      */
-    private List<YearEndEquity> buildYearEndMarks(DailyBars bars, List<LocalDate> dates,
+    private List<YearEndEquity> buildYearEndMarks(DailyBars bars, List<LocalDate> dates, int tradeStartIdx,
                                                   List<PeriodSnapshot> snapshots, double initialCapital) {
         List<YearEndEquity> marks = new ArrayList<>();
         if (dates.isEmpty()) {
             return marks;
         }
         Map<Integer, Integer> lastIdxByYear = new LinkedHashMap<>();
-        for (int i = 0; i < dates.size(); i++) {
+        for (int i = tradeStartIdx; i < dates.size(); i++) { // warm-up years are not reported
             lastIdxByYear.put(dates.get(i).getYear(), i); // last write per year wins
         }
         for (Map.Entry<Integer, Integer> entry : lastIdxByYear.entrySet()) {
@@ -497,8 +565,13 @@ public final class RotationEngine {
         Map<String, Double> peakPrices = new LinkedHashMap<>(snapshot.peakPrices);
         Map<String, Double> entryPrices = new LinkedHashMap<>(snapshot.entryPrices);
         double deployedCapital = snapshot.deployedCapital;
-        StopResult sr = applyStops(bars, snapshot.executionIdx, targetIdx, dates, holdings, stopBasis,
-                peakPrices, entryPrices, snapshot.rebalanceNumber, snapshot.cash, new ArrayList<>());
+        // Replay stops triggered by closes BEFORE the target session only: those fill at
+        // or before the target open. A stop triggered by the target close fills at the
+        // next open, so the position is still held (and valued) at the target close;
+        // replaying it here would book a future open price into this mark.
+        StopResult sr = applyStops(bars, snapshot.executionIdx, targetIdx - 1, dates, holdings, stopBasis,
+                peakPrices, entryPrices, snapshot.rebalanceNumber, snapshot.cash, new ArrayList<>(),
+                new ArrayList<>());
         deployedCapital -= sr.basisRemoved;
         double value = 0.0;
         for (Map.Entry<String, Double> h : holdings.entrySet()) {
@@ -512,70 +585,64 @@ public final class RotationEngine {
         return snapshot.accountEquity + markPeriodPnl;
     }
 
-    private static final int FIRST_TRADING_DAY = 1;
-    private static final int SECOND_REBALANCE_DAY_OF_MONTH = 11;
-
     static final String MODE_MONTHLY = "monthly";
     static final String MODE_WEEKLY = "weekly";
     static final String MODE_MONTHLY_TWICE = "monthly_twice";
 
-    private static String scheduleLabel(String mode) {
+    /** Trading sessions between consecutive rebalances for a rebalance.mode. */
+    public static int rebalanceIntervalSessions(String mode) {
         switch (mode) {
-            case MODE_MONTHLY:
-                return "monthly@trading-day-1";
             case MODE_WEEKLY:
-                return "weekly@trading-day-1";
+                return 5;
             case MODE_MONTHLY_TWICE:
+                return 10;
+            case MODE_MONTHLY:
+                return 20;
             default:
-                return "monthly@trading-day-1&11";
+                throw new IllegalArgumentException("Unknown rebalance.mode: " + mode);
         }
+    }
+
+    private static String scheduleLabel(String mode) {
+        return mode + "@every-" + rebalanceIntervalSessions(mode) + "-sessions";
     }
 
     /**
-     * Signal indices for the configured schedule. Each signal is the session
-     * immediately BEFORE a target trading day: the first trading day of the
-     * period (week or month) and, for {@code monthly_twice}, also the 11th
-     * trading day of the month. Ranking uses that prior close and the engine
-     * executes at the target day's open (index {@code signalIdx + 1}), so a
-     * switch is placed before the day trades.
+     * Index of the first session on/after {@code startDate} (0 when unset). Earlier
+     * sessions only feed the lookback window and eligibility counts.
      */
-    private static List<Integer> computeRebalanceSignalIndices(List<LocalDate> dates, String mode) {
-        TreeSet<Integer> signalIndices = new TreeSet<>();
-        if (mode.equals(MODE_WEEKLY)) {
-            Map<LocalDate, List<Integer>> byWeek = new LinkedHashMap<>();
-            for (int i = 0; i < dates.size(); i++) {
-                LocalDate day = dates.get(i);
-                LocalDate weekStart = day.minusDays(day.getDayOfWeek().getValue() - 1L);
-                byWeek.computeIfAbsent(weekStart, ignored -> new ArrayList<>()).add(i);
-            }
-            for (List<Integer> weekDays : byWeek.values()) {
-                addRebalanceSignal(signalIndices, weekDays, FIRST_TRADING_DAY);
-            }
-        } else {
-            Map<YearMonth, List<Integer>> byMonth = new LinkedHashMap<>();
-            for (int i = 0; i < dates.size(); i++) {
-                byMonth.computeIfAbsent(YearMonth.from(dates.get(i)), ignored -> new ArrayList<>()).add(i);
-            }
-            for (List<Integer> monthDays : byMonth.values()) {
-                addRebalanceSignal(signalIndices, monthDays, FIRST_TRADING_DAY);
-                if (mode.equals(MODE_MONTHLY_TWICE)) {
-                    addRebalanceSignal(signalIndices, monthDays, SECOND_REBALANCE_DAY_OF_MONTH);
-                }
+    private static int tradeStartIndex(List<LocalDate> dates, LocalDate startDate) {
+        if (startDate == null) {
+            return 0;
+        }
+        for (int i = 0; i < dates.size(); i++) {
+            if (!dates.get(i).isBefore(startDate)) {
+                return i;
             }
         }
-        return new ArrayList<>(signalIndices);
+        throw new IllegalArgumentException("No data available on/after start date: " + startDate);
     }
 
-    private static void addRebalanceSignal(TreeSet<Integer> out, List<Integer> periodDays, int tradingDayOfPeriod) {
-        int position = tradingDayOfPeriod - 1;
-        if (position < 0 || position >= periodDays.size()) {
-            return; // period has fewer trading days than requested position
+    /**
+     * Signal indices (execution is at {@code signalIdx + 1}). The first signal is the
+     * earliest session, no earlier than the one before the start date, whose lookback
+     * window is complete and has at least one eligible symbol. Each later signal is
+     * {@link #rebalanceIntervalSessions} trading sessions after the previous one.
+     */
+    private List<Integer> computeRebalanceSignalIndices(DailyBars bars, int tradeStartIdx,
+                                                        int lookbackDays, int minHistory) {
+        int interval = rebalanceIntervalSessions(config.rebalanceMode());
+        int lastSignal = bars.dateCount() - 2;
+        int first = Math.max(tradeStartIdx - 1, lookbackDays - 1);
+        while (first <= lastSignal
+                && rankUniverse(bars, first, first - (lookbackDays - 1), minHistory).isEmpty()) {
+            first++;
         }
-        int executionIdx = periodDays.get(position);
-        int signalIdx = executionIdx - 1;
-        if (signalIdx >= 0) {
-            out.add(signalIdx);
+        List<Integer> signalIndices = new ArrayList<>();
+        for (int signal = first; signal <= lastSignal; signal += interval) {
+            signalIndices.add(signal);
         }
+        return signalIndices;
     }
 
     /**
@@ -770,7 +837,7 @@ public final class RotationEngine {
                                   Map<String, Double> holdings, Map<String, Double> stopBasis,
                                   Map<String, Double> peakPrices, Map<String, Double> entryPrices,
                                   int owningRebalanceNumber, double startingCash,
-                                  List<TradebookRow> tradebookRows) {
+                                  List<TradebookRow> tradebookRows, List<LedgerFill> fills) {
         StopResult result = new StopResult();
         result.cash = startingCash;
         double stopLossPct = config.stopLossPct();
@@ -799,8 +866,10 @@ public final class RotationEngine {
                 // stop is evaluated against today's close, so nothing exits on its own bar.
                 double peak = peakPrices.getOrDefault(symbol, basis);
                 double stopLevel = Double.NEGATIVE_INFINITY;
+                double hardLevel = Double.NEGATIVE_INFINITY;
                 if (stopLossPct > 0.0) {
-                    stopLevel = Math.max(stopLevel, basis * (1.0 - stopLossPct / 100.0));
+                    hardLevel = basis * (1.0 - stopLossPct / 100.0);
+                    stopLevel = Math.max(stopLevel, hardLevel);
                 }
                 if (trailingStopPct > 0.0) {
                     stopLevel = Math.max(stopLevel, peak * (1.0 - trailingStopPct / 100.0));
@@ -826,6 +895,15 @@ public final class RotationEngine {
                 tradebookRows.add(new TradebookRow(dates.get(fillIdx), "STOP", symbol, qty, fillOpen,
                         round2(proceeds), entry, fillOpen, round2(reportedPnl), round2(before),
                         round2(result.cash), dates.get(d), owningRebalanceNumber));
+                String rule = hardLevel >= stopLevel
+                        ? String.format(Locale.US, "Stop-loss %.2f%% below period entry %.2f",
+                                stopLossPct, basis)
+                        : String.format(Locale.US, "Trailing stop %.2f%% below peak close %.2f",
+                                trailingStopPct, peak);
+                fills.add(new LedgerFill(dates.get(fillIdx), dates.get(d), owningRebalanceNumber,
+                        LedgerFill.STOP, symbol, qty, fillOpen,
+                        String.format(Locale.US, "%s: close %.2f <= stop %.2f on %s; filled next open",
+                                rule, close, stopLevel, dates.get(d))));
                 holdings.remove(symbol);
                 stopBasis.remove(symbol);
                 peakPrices.remove(symbol);

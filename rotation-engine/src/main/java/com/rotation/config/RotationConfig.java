@@ -30,12 +30,16 @@ public final class RotationConfig {
     private final String symbolsFile;
     private final String sectorFile;
     private final int maxPerSector;
+    private final String marketSector;
     private final String outputDir;
     private final String outputPrefix;
     private final boolean verbose;
+    private final boolean portalEnabled;
+    private final Path sourceFile;
 
-    private RotationConfig(Path projectRoot, Properties props) {
+    private RotationConfig(Path projectRoot, Path sourceFile, Properties props) {
         this.projectRoot = projectRoot;
+        this.sourceFile = sourceFile;
         this.lookbackDays = intProp(props, "lookback.days", 30);
         this.topN = intProp(props, "top.n", 1);
         this.exitN = intProp(props, "exit.n", 0);
@@ -52,9 +56,11 @@ public final class RotationConfig {
         this.symbolsFile = stringProp(props, "symbols.file", "");
         this.sectorFile = stringProp(props, "sector.file", "");
         this.maxPerSector = intProp(props, "max.per.sector", 0);
+        this.marketSector = stringProp(props, "market.sector", "");
         this.outputDir = stringProp(props, "output.dir", "output/rotation");
         this.outputPrefix = stringProp(props, "output.prefix", "rotation");
         this.verbose = booleanProp(props, "verbose", true);
+        this.portalEnabled = booleanProp(props, "portal.enabled", true);
         validate();
     }
 
@@ -65,7 +71,7 @@ public final class RotationConfig {
         } catch (IOException e) {
             throw new IllegalArgumentException("Unable to read config file: " + configFile, e);
         }
-        return new RotationConfig(projectRoot, props);
+        return new RotationConfig(projectRoot, configFile, props);
     }
 
     private void validate() {
@@ -92,6 +98,9 @@ public final class RotationConfig {
         }
         if (maxPerSector < 0) {
             throw new IllegalArgumentException("max.per.sector must be zero or positive.");
+        }
+        if (!marketSector.isBlank() && sectorFile.isBlank()) {
+            throw new IllegalArgumentException("market.sector requires sector.file to be set.");
         }
         if (startDate != null && endDate != null && endDate.isBefore(startDate)) {
             throw new IllegalArgumentException("end.date must be on or after start.date.");
@@ -143,9 +152,18 @@ public final class RotationConfig {
         return absolute(Path.of(sectorFile));
     }
 
-    /** Maximum holdings allowed from a single sector each rebalance (0 disables the cap). */
+    /**
+     * Maximum holdings allowed from a single sector each rebalance (0 disables the cap).
+     * Always 0 when market.sector is set: every name shares one sector, so the cap would
+     * only block exit.n buffer retention.
+     */
     public int maxPerSector() {
-        return maxPerSector;
+        return marketSector() != null ? 0 : maxPerSector;
+    }
+
+    /** Sector the universe is restricted to (matched case-insensitively); null when not configured. */
+    public String marketSector() {
+        return marketSector.isBlank() ? null : marketSector;
     }
 
     private Path absolute(Path candidate) {
@@ -222,6 +240,21 @@ public final class RotationConfig {
 
     public boolean verbose() {
         return verbose;
+    }
+
+    /** Write the self-contained HTML reporting portal alongside the CSV reports. */
+    public boolean portalEnabled() {
+        return portalEnabled;
+    }
+
+    /** Config file this configuration was loaded from (recorded in the run manifest). */
+    public Path sourceFile() {
+        return sourceFile;
+    }
+
+    /** Directory relative config paths resolve from (the working directory). */
+    public Path projectRoot() {
+        return projectRoot;
     }
 
     private static String stringProp(Properties props, String key, String def) {

@@ -3,9 +3,11 @@ package com.rotation;
 import com.rotation.config.RotationConfig;
 import com.rotation.data.DailyBarLoader;
 import com.rotation.data.MinuteHistoryDailyBarLoader;
+import com.rotation.data.SectorSymbolsReader;
 import com.rotation.data.SnapshotDailyBarLoader;
 import com.rotation.engine.RotationEngine;
 import com.rotation.job.DailyRefreshJob;
+import com.rotation.job.DailyReportJob;
 import com.rotation.model.DailyBars;
 import com.rotation.model.SymbolDailyCandles;
 import com.rotation.report.CsvExporter;
@@ -70,9 +72,10 @@ public final class Main {
         List<SymbolDailyCandles> series = loader.load(dataDir);
         DailyBars bars = DailyBars.build(series, loader.forwardFill());
 
+        // start.date does not trim the data: full history is kept so the lookback
+        // window is already warm on the start date. The engine trades from start.date.
         if (config.startDate() != null) {
-            bars = bars.filterFrom(config.startDate());
-            System.out.printf(Locale.US, "Applying start date filter: %s (first available date: %s)%n",
+            System.out.printf(Locale.US, "Trading from start date: %s (history loaded from %s for lookback warm-up)%n",
                     config.startDate(), bars.dates().get(0));
         }
 
@@ -91,6 +94,16 @@ public final class Main {
                     symbolsFile, bars.symbolCount(), before);
         }
 
+        String marketSector = config.marketSector();
+        if (marketSector != null) {
+            List<String> sectorSymbols =
+                    SectorSymbolsReader.readSymbolsInSector(config.resolveSectorFile(), marketSector);
+            int before = bars.symbolCount();
+            bars = bars.restrictTo(sectorSymbols);
+            System.out.printf(Locale.US, "Universe filtered by market.sector '%s': %d matched (was %d in source)%n",
+                    marketSector, bars.symbolCount(), before);
+        }
+
         Path outputDir = config.resolveOutputDir();
         String prefix = config.outputPrefix();
         new MarketSnapshotExporter().export(bars, outputDir, prefix);
@@ -105,6 +118,7 @@ public final class Main {
 
         var rotationResult = new RotationEngine(config).run(snapshotBars);
         new CsvExporter().export(rotationResult, outputDir, prefix);
+        new DailyReportJob().run(config, snapshotBars, rotationResult);
 
         System.out.println();
         System.out.printf(Locale.US, "Data directory: %s%n", dataDir);

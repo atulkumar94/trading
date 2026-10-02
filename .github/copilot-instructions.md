@@ -28,7 +28,8 @@ This is a data pipeline project. Our goal is:
 - Building a trading execution system
 - Supporting real-time data feeds
 - Optimizing strategy parameters (parameter tuning is manual; engine just runs the backtest)
-- Building a web interface or dashboard
+- Building a web interface or dashboard (exception: the generated, read-only, offline
+  `rotation_portal.html` report, which only displays engine outputs; no backend, server, live data or trading)
 
 If a request conflicts with this focus, ask the user to clarify alignment with the core data pipeline.
 

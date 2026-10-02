@@ -13,11 +13,22 @@ public final class BacktestResult {
     private final List<HoldingsRow> holdingsRows;
     private final List<YearEndEquity> yearEndMarks;
     private final double initialCapital;
+    private final List<LedgerFill> fills;
+    private final List<DailyMark> dailyMarks;
 
     public BacktestResult(List<RebalanceRecord> rebalances, List<EquityRow> equityCurve,
                           List<PerformanceRow> performanceRows, List<TradebookRow> tradebookRows,
                           List<LookbackRow> lookbackRows, List<HoldingsRow> holdingsRows,
                           List<YearEndEquity> yearEndMarks, double initialCapital) {
+        this(rebalances, equityCurve, performanceRows, tradebookRows, lookbackRows, holdingsRows,
+                yearEndMarks, initialCapital, List.of(), List.of());
+    }
+
+    public BacktestResult(List<RebalanceRecord> rebalances, List<EquityRow> equityCurve,
+                          List<PerformanceRow> performanceRows, List<TradebookRow> tradebookRows,
+                          List<LookbackRow> lookbackRows, List<HoldingsRow> holdingsRows,
+                          List<YearEndEquity> yearEndMarks, double initialCapital,
+                          List<LedgerFill> fills, List<DailyMark> dailyMarks) {
         this.rebalances = rebalances;
         this.equityCurve = equityCurve;
         this.performanceRows = performanceRows;
@@ -26,6 +37,8 @@ public final class BacktestResult {
         this.holdingsRows = holdingsRows;
         this.yearEndMarks = yearEndMarks;
         this.initialCapital = initialCapital;
+        this.fills = fills;
+        this.dailyMarks = dailyMarks;
     }
 
     public List<RebalanceRecord> rebalances() {
@@ -58,5 +71,15 @@ public final class BacktestResult {
 
     public double initialCapital() {
         return initialCapital;
+    }
+
+    /** Every position change in execution order, including re-weights (see {@link LedgerFill}). */
+    public List<LedgerFill> fills() {
+        return fills;
+    }
+
+    /** End-of-day engine state for every session from the trade start date. */
+    public List<DailyMark> dailyMarks() {
+        return dailyMarks;
     }
 }

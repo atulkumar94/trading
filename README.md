@@ -9,13 +9,16 @@ symbols.csv
     ↓  download_nse_data.py (yfinance)
 stocks/daily/{SYMBOL}.csv
     ↓  rotation-engine: MinuteHistoryDailyBarLoader → DailyBars
-filter (start.date / end.date / symbols.file)
+filter (end.date / symbols.file / market.sector) — full history kept for lookback warm-up
     ↓  MarketSnapshotExporter
 rotation_daily_market_snapshot.csv   ← single source of truth
     ↓  SnapshotDailyBarLoader (reload)
     ├─→ MonthlyMarketSnapshotExporter → rotation_monthly_market_snapshot.csv
-    └─→ RotationEngine → CsvExporter → rebalances / equity / performance /
-                                        tradebook / holdings / lookback / yearly
+    └─→ RotationEngine (trades from start.date) → CsvExporter → rebalances / equity / performance /
+                                        │               tradebook / holdings / lookback / yearly
+                                        └─→ DailyReportJob → daily_portfolio / daily_positions / trade_ledger
+                                                           → run_manifest.json (config, coverage, checks)
+                                                           → rotation_portal.html (self-contained report)
 ```
 
 ## Project structure
@@ -83,23 +86,26 @@ All settings live in [rotation-engine/config/rotation.properties](rotation-engin
 | Key | Purpose |
 |-----|---------|
 | `data.path` | Folder of daily CSVs (default `../stocks/daily`) |
-| `start.date` / `end.date` | Optional date window |
+| `start.date` | Optional first trading date. History before it is still loaded and used for the lookback, so the first rebalance executes on the start date itself (it only waits `lookback.days` when no earlier history exists) |
+| `end.date` | Optional inclusive end date; data after it is dropped |
 | `symbols.file` | Optional CSV with a `symbol` column to restrict the universe |
 | `sector.file` / `max.per.sector` | Sector diversification cap (default `../symbols.csv`) |
+| `market.sector` | Optional: run on one sector only (e.g. `Healthcare`, case-insensitive, must exist in `sector.file`). Disables `max.per.sector` |
 | `lookback.days` | Momentum lookback in trading sessions |
 | `top.n` / `exit.n` | Names entered / rank threshold before exit |
-| `rebalance.mode` | `monthly`, `weekly`, or `monthly_twice` |
+| `rebalance.mode` | Trading-session cadence after the first rebalance (which runs as soon as the lookback is complete): `weekly` = every 5 sessions, `monthly_twice` = every 10, `monthly` = every 20 |
 | `capital.per.stock`, `allocation.mode`, `monthly.contribution` | Sizing |
 | `stop.loss.pct` / `trailing.stop.pct` | Intra-period exits |
 | `min.history.days` | Eligibility (engine enforces `max(min.history.days, lookback.days)`) |
 | `output.dir` / `output.prefix` | Report location and file prefix |
+| `portal.enabled` | Write the self-contained HTML reporting portal (default `true`) |
 
 ## Outputs
 
 All in `rotation-engine/output/rotation/` with prefix `rotation`:
 
-- `_daily_market_snapshot.csv` — one row per symbol per trading day (source of truth)
-- `_monthly_market_snapshot.csv` — one row per symbol per month
+- `_daily_market_snapshot.csv` — one row per symbol per trading day (source of truth; full history up to `end.date`, including pre-`start.date` warm-up)
+- `_monthly_market_snapshot.csv` — one row per symbol per month (same range)
 - `_rebalances.csv` — one row per rebalance
 - `_equity.csv` — equity curve
 - `_performance.csv` — ranked universe per rebalance
@@ -107,12 +113,75 @@ All in `rotation-engine/output/rotation/` with prefix `rotation`:
 - `_holdings.csv` — positions per period
 - `_lookback.csv` — latest lookback ranking
 - `_yearly.csv` — calendar-year returns
+- `_daily_portfolio.csv` — one row per session from the trade start: cash, invested value, equity, contributions, P&L, daily return, TWR index, drawdown
+- `_daily_positions.csv` — one row per held symbol per session: entry date, quantity, entry price, average cost, cost basis, adjusted close, market value, unrealized P&L, weight, price status
+- `_trade_ledger.csv` — every fill in execution order, incl. the share re-weights of held names (`ADD`/`TRIM`) that the tradebook omits, with average-cost realized P&L and the exit reason
+- `_run_manifest.json` — configuration, data coverage, valuation conventions, output row counts, reconciliation results and data-quality warnings for the run
+- `_portal.html` — the reporting portal (see below; skip with `portal.enabled=false`)
+
+## Reporting portal
+
+`rotation_portal.html` is a single, read-only HTML file written by every engine run (default and
+`daily-refresh`). All data and the chart library are embedded, so it opens offline straight from disk:
+no server, no CDN, no CSV fetching. It is a reporting view only: no trading, no live data, no
+parameter optimization.
+
+```bash
+cd rotation-engine
+mvn -q compile && java -cp target/classes com.rotation.Main   # writes CSVs + manifest + portal
+open output/rotation/rotation_portal.html                     # macOS; any modern browser works
+```
+
+The file is ~14 MB for 177 symbols × 16 years. It embeds full-history adjusted OHLC for every symbol.
+
+**Toolbar** (applies to every view): *As of* date, range presets (30 calendar days, 30 trading
+sessions, MTD, YTD, All), a custom *From* date (the range always ends on the as-of date), and a symbol
+filter. State is kept in the URL hash, so a view can be bookmarked.
+
+**Views:** Overview (equity, cash, invested, P&L split, drawdown, equity curve, daily returns), Tradebook
+(sortable/filterable fills with exit reasons), Holdings (positions at the as-of close with cost, value,
+unrealized P&L, weight, sector), Stocks (adjusted candles with entry/exit/stop markers, relative
+performance vs. other symbols or the portfolio), Performance (preset and custom ranges, monthly grid,
+yearly results, largest drawdowns), Rankings (rankings and decisions at each rebalance, plus the daily
+lookback ranking for the last 30 sessions), Run details (configuration, coverage, checks, warnings).
+Each panel is badged **As of** (end-of-day state on the as-of date) or **Range** (the selected range).
+Clicking a trade, holding or ranking row opens its stock chart. Every table exports its filtered rows to CSV.
+
+**Definitions** (all computed in Java; the browser only compounds and differences the engine's daily figures):
+
+| Term | Definition |
+|------|------------|
+| As-of date | End of day: every execution at that session's open has happened (stop fills from the prior close, then the rebalance), valued at that session's adjusted close. A non-trading date resolves to the previous session, and the effective date is shown. Nothing after it (trades, prices, rankings) is displayed. |
+| Signal vs. execution date | Rankings use the signal session's close; trades execute at the next session's open. Stops trigger on a close and fill at the next open. |
+| Account equity | The engine's mark-to-market equity. It always reconciles to cash + Σ quantity × adjusted close. |
+| Contributions | External cash (`monthly.contribution`), credited at a rebalance open. Excluded from P&L and returns. |
+| Daily return | `equity / (previous equity + same-day contribution) − 1`: time-weighted and contribution adjusted. |
+| Range return | Daily returns chained over the sessions in the range, measured from the close before the range (or initial capital at inception). Range P&L = end equity − start equity − contributions. |
+| Drawdown | Chained (TWR) index vs. its running peak. |
+| Realized / unrealized P&L | Average cost, incl. rebalance re-weights, so realized + unrealized = total P&L = equity − initial capital − contributions. The tradebook's `realized_pnl` ((exit − first entry price) × exit quantity) is kept as `pnl_vs_entry_price`. |
+| Partial / insufficient history | Months and years that were not invested for the whole period, or that end at the as-of date, are marked partial (†). Ranges that need history from before the backtest start are flagged *insufficient history*. Annualized figures need ≥ 1 year; volatility needs ≥ 20 sessions. |
+
+**Validation:** each run reconciles the daily reports against the existing ones and fails loudly on a
+mismatch. Checks: row counts, unique date/symbol keys, equity = cash + invested, the P&L split,
+year-end marks vs. `_yearly.csv`, rebalance-open marks vs. `_rebalances.csv`, the final mark vs.
+`_holdings.csv`, ledger vs. `_tradebook.csv`, and every fill executing after its signal. Results are
+in the manifest and the Run details view.
+
+**Limitations:**
+- No volume: the daily snapshot the engine trades on has no volume column.
+- Prices are embedded rounded to 0.01 (0.001 / 0.0001 for symbols trading below 10 / 1), for display only. Valuations come from the engine at full precision.
+- Forward-filled bars in the source data can't be told apart from real ones. Bars identical to the prior session are flagged as possibly stale.
+- A held position with no close is valued at zero (engine convention) and flagged.
+- The daily lookback ranking is exported only for the last 30 sessions; rebalance rankings cover the full history.
+- Yearly *engine* rows treat contributions at year end and report XIRR; the TWR column is shown alongside. They are equal when there are no contributions.
 
 ## Development
 
 ```bash
 cd rotation-engine
-mvn test
+mvn test                                        # Java unit + engine tests
+node --test src/test/js/portal-metrics.test.js  # portal range arithmetic (Node ≥ 18, no packages);
+                                                # [generated] tests also check output/rotation/ after a run
 ```
 
 See [rotation-engine/README.md](rotation-engine/README.md) for engine internals and [.github/copilot-instructions.md](.github/copilot-instructions.md) for development rules.

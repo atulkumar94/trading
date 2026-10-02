@@ -115,7 +115,7 @@ def download_symbol(symbol: str, start: str, end: Optional[str], outdir: Path) -
 def main():
     parser = argparse.ArgumentParser(description="Bulk-download NSE daily OHLC data via yfinance.")
     parser.add_argument("csv_path", help="Path to CSV file with a header row and NSE stock codes.")
-    parser.add_argument("--start", default="2005-01-01", help="Start date, YYYY-MM-DD (default: 2020-01-01)")
+    parser.add_argument("--start", default="2010-01-01", help="Start date, YYYY-MM-DD (default: 2010-01-01)")
     parser.add_argument("--end", default=None, help="End date, YYYY-MM-DD (default: today)")
     parser.add_argument(
         "--outdir",

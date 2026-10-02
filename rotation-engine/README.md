@@ -6,7 +6,7 @@ In simple terms, it does this:
 
 1. Reads historical daily stock data from the configured folder.
 2. Builds a clean daily OHLCV dataset for each symbol.
-3. Applies a start date filter, so you can run from a specific historical date onward.
+3. Keeps the full history for lookback warm-up and starts trading from the configured start date.
 4. Exports a daily market snapshot with one row per symbol per day.
 5. Builds a monthly market snapshot with one row per symbol per month.
 6. Can also be run as a dedicated daily refresh job to regenerate the snapshot files from the latest historical data.
@@ -29,7 +29,7 @@ The engine is designed around a simple idea:
 
 - load the raw stock history
 - normalize the data into daily bars
-- filter from a configured start date
+- trade from a configured start date (earlier history warms up the lookback)
 - export daily and monthly snapshots in CSV format
 
 ---
@@ -48,6 +48,7 @@ This file controls:
 - the output folder
 - the output file prefix
 - optional symbol filtering
+- optional single-sector universe (`market.sector`)
 
 The most important setting here is the input path:
 
@@ -72,21 +73,63 @@ Each symbol file is normalized into a dataset with fields such as:
 
 This is done in the classes under the data package and then converted into a single daily matrix using the bar model.
 
-### 3) Date filtering
+### 3) Start date and lookback warm-up
 
-The project supports a configurable `start.date`.
+The project supports a configurable `start.date`. It is the date the backtest
+**starts trading**, not a data filter.
 
-When set, the system keeps only data from that date onward. This matters for:
+All available history (up to `end.date`) is always loaded and kept, so on the
+start date the lookback window and the min-history eligibility counts are
+already filled from the sessions before it:
 
-- historical backfills
-- running a specific historical window
-- daily refresh jobs that should start from a chosen point in time
+- the first rebalance executes at the open of the first session on/after `start.date`
+  (ranked on the prior session's close), then the `rebalance.mode` cadence follows
+- no trades, equity rows or yearly rows are produced before `start.date`
+- if `start.date` is at (or before) the start of the history, there is nothing to warm up
+  from, so the first rebalance waits until the lookback is complete (see below)
 
-So the engine does not have to process the entire dataset if you want only a slice of history.
+### Rebalance schedule
+
+Rebalances are counted in **trading sessions**, not calendar dates:
+
+1. **First rebalance:** the earliest session (no earlier than `start.date`) whose
+   prior session has a full `lookback.days` window and at least one eligible symbol.
+2. **After that:** every N trading sessions, set by `rebalance.mode`:
+
+| `rebalance.mode` | Rebalance every |
+|------------------|-----------------|
+| `weekly`         | 5 trading sessions |
+| `monthly_twice`  | 10 trading sessions (default) |
+| `monthly`        | 20 trading sessions |
+
+Each decision is ranked on the signal session's close and executed at the next
+session's open. Example: history starts 2010-01-04 and `lookback.days=90`, so the
+90th session (2010-05-14) is the first signal, the first trade is at the open of
+2010-05-17, and with `monthly` the next is 20 sessions later (2010-06-14).
+
+Because the cadence ignores calendar months, a month can occasionally have no
+rebalance; `monthly.contribution` still credits every elapsed month.
+
+`end.date` is still a hard filter: data after it is dropped.
+
+### Universe filters
+
+After loading, the universe can be narrowed (applied in this order, in both the
+default and daily refresh modes):
+
+- `symbols.file` — keep only symbols listed in its `symbol` column
+- `market.sector` — keep only symbols whose `sector` in `sector.file` matches
+  (case-insensitive), e.g. `market.sector=Healthcare`. Requires `sector.file`;
+  the run fails if no symbol has that sector. Because every remaining name shares
+  one sector, `max.per.sector` is ignored while this is set.
+
+Snapshots and backtest outputs then cover only the filtered symbols.
 
 ### 4) Snapshot export
 
-After loading and filtering the history, the engine creates snapshot outputs in the output folder.
+After loading the history, the engine creates snapshot outputs in the output folder.
+The daily and monthly snapshots cover the full loaded history (including the warm-up
+period before `start.date`), because the engine reads its bars from the daily snapshot.
 
 Typical outputs include:
 
@@ -110,8 +153,8 @@ The project also includes a dedicated refresh job designed for scheduled runs.
 
 This is the intended operational model:
 
-1. load all historical stock data
-2. filter from the configured start date
+1. load all historical stock data (up to `end.date`)
+2. trade from the configured start date, using earlier history as lookback warm-up
 3. rebuild the daily snapshot
 4. rebuild the monthly snapshot
 5. save the files in the configured output folder
@@ -122,7 +165,7 @@ A typical daily refresh is simple:
 
 - run once a day
 - read the latest historical files
-- rebuild the snapshots from the configured date onward
+- rebuild the snapshots from the full history and the backtest from the configured date onward
 - overwrite the current output files
 
 This matches the requirement of a daily market snapshot system.
@@ -301,6 +344,10 @@ mis-attributed to whichever rebalance date happened to sit nearest the year end.
 
 This is especially useful when you want to see multi-year performance in a compact way.
 
+A year-end mark replays only the stops triggered by closes *before* the year-end session (those fill
+at or before its open). A stop triggered by the year-end close itself fills at the next open, so the
+position is still valued at the year-end close. No future open price leaks into the yearly report.
+
 ### 5) tradebook
 
 `rotation_tradebook.csv`
@@ -338,6 +385,26 @@ This contains the latest 30 trading-day lookback rankings using the current run 
 
 ---
 
+### 7) daily reports, run manifest and portal
+
+`DailyReportJob` runs after the CSV exports in both modes:
+
+- `RotationEngine` records every fill (`LedgerFill`: ENTRY, ADD/TRIM re-weights, EXIT, STOP, DROP)
+  and an end-of-day `DailyMark` per session (book after that session's open executions, engine
+  mark-to-market equity at its close).
+- `DailyValuationBuilder` replays the fills on an independent cash ledger with average-cost accounting
+  and writes `rotation_daily_portfolio.csv`, `rotation_daily_positions.csv` and `rotation_trade_ledger.csv`.
+  If the replayed book diverges from the engine's book on any day, it throws.
+- `ReportReconciler` checks the new reports against `rotation_rebalances.csv`, `rotation_holdings.csv`,
+  `rotation_yearly.csv` and `rotation_tradebook.csv`. A failed check stops the run after the files are
+  written, so they can be inspected.
+- `PerformanceCalculator` computes the range presets embedded in `rotation_run_manifest.json`. The
+  portal recomputes them in the browser and shows the cross-check in *Run details*.
+- `PortalExporter` writes `rotation_portal.html` from `src/main/resources/portal/` (template, CSS,
+  `portal-metrics.js`, `portal.js` and the vendored Lightweight Charts 5.2.1, Apache-2.0).
+
+See the root README's *Reporting portal* section for metric definitions and limitations.
+
 ## How to run it
 
 From the project root:
@@ -362,6 +429,9 @@ This will:
 - `RotationEngine.java` — core backtesting logic
 - `MinuteHistoryDailyBarLoader.java` — loads external daily/history CSVs
 - `CsvExporter.java` — writes CSV reports
+- `DailyValuationBuilder.java` / `ReportReconciler.java` / `PerformanceCalculator.java` — daily accounting, reconciliation, range metrics
+- `DailyReportExporter.java` / `RunManifestBuilder.java` / `PortalExporter.java` — daily CSVs, run manifest, HTML portal
+- `job/DailyReportJob.java` — orchestrates the daily reports after `CsvExporter`
 
 ---
 

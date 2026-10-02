@@ -3,6 +3,7 @@ package com.rotation.job;
 import com.rotation.config.RotationConfig;
 import com.rotation.data.DailyBarLoader;
 import com.rotation.data.MinuteHistoryDailyBarLoader;
+import com.rotation.data.SectorSymbolsReader;
 import com.rotation.data.SnapshotDailyBarLoader;
 import com.rotation.engine.RotationEngine;
 import com.rotation.model.DailyBars;
@@ -20,7 +21,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
-/** Daily refresh job that rebuilds the market snapshot outputs from a configurable start date. */
+/** Daily refresh job that rebuilds the market snapshot outputs and trades from a configurable start date. */
 public final class DailyRefreshJob {
 
     public void run(RotationConfig config, Path projectRoot) {
@@ -34,10 +35,8 @@ public final class DailyRefreshJob {
         List<SymbolDailyCandles> series = loader.load(dataDir);
         DailyBars bars = DailyBars.build(series, loader.forwardFill());
 
-        if (config.startDate() != null) {
-            bars = bars.filterFrom(config.startDate());
-        }
-
+        // start.date does not trim the data: full history is kept so the lookback
+        // window is already warm on the start date. The engine trades from start.date.
         if (config.endDate() != null) {
             bars = bars.filterTo(config.endDate());
         }
@@ -46,6 +45,12 @@ public final class DailyRefreshJob {
         if (symbolsFile != null) {
             List<String> requested = readSymbols(symbolsFile);
             bars = bars.restrictTo(requested);
+        }
+
+        String marketSector = config.marketSector();
+        if (marketSector != null) {
+            bars = bars.restrictTo(
+                    SectorSymbolsReader.readSymbolsInSector(config.resolveSectorFile(), marketSector));
         }
 
         Path outputDir = config.resolveOutputDir();
@@ -62,6 +67,7 @@ public final class DailyRefreshJob {
 
         var rotationResult = new RotationEngine(config).run(snapshotBars);
         new CsvExporter().export(rotationResult, outputDir, prefix);
+        new DailyReportJob().run(config, snapshotBars, rotationResult);
 
         System.out.printf(Locale.US, "Daily refresh job: processed %d symbols and %d dates from %s to %s%n",
                 snapshotBars.symbolCount(), snapshotBars.dateCount(),
