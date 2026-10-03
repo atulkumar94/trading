@@ -25,10 +25,12 @@ public final class DailyBars {
     private final double[][] highs;   // [dateIdx][symbolIdx]
     private final double[][] lows;    // [dateIdx][symbolIdx]
     private final double[][] closes;  // [dateIdx][symbolIdx]
+    private final double[][] volumes; // [dateIdx][symbolIdx]; NaN when unknown, 0 on filled gaps
     private final int[][] eligibility; // [dateIdx][symbolIdx]
 
     private DailyBars(List<LocalDate> dates, List<String> symbols, Map<String, Integer> symbolIndex,
-                      double[][] opens, double[][] highs, double[][] lows, double[][] closes, int[][] eligibility) {
+                      double[][] opens, double[][] highs, double[][] lows, double[][] closes,
+                      double[][] volumes, int[][] eligibility) {
         this.dates = dates;
         this.symbols = symbols;
         this.symbolIndex = symbolIndex;
@@ -36,6 +38,7 @@ public final class DailyBars {
         this.highs = highs;
         this.lows = lows;
         this.closes = closes;
+        this.volumes = volumes;
         this.eligibility = eligibility;
     }
 
@@ -80,6 +83,7 @@ public final class DailyBars {
         double[][] highs = new double[rows][cols];
         double[][] lows = new double[rows][cols];
         double[][] closes = new double[rows][cols];
+        double[][] volumes = new double[rows][cols];
         for (double[] row : opens) {
             java.util.Arrays.fill(row, Double.NaN);
         }
@@ -90,6 +94,9 @@ public final class DailyBars {
             java.util.Arrays.fill(row, Double.NaN);
         }
         for (double[] row : closes) {
+            java.util.Arrays.fill(row, Double.NaN);
+        }
+        for (double[] row : volumes) {
             java.util.Arrays.fill(row, Double.NaN);
         }
 
@@ -107,6 +114,7 @@ public final class DailyBars {
                 highs[row][col] = candle.high();
                 lows[row][col] = candle.low();
                 closes[row][col] = candle.close();
+                volumes[row][col] = candle.volume();
             }
         }
 
@@ -115,6 +123,15 @@ public final class DailyBars {
             forwardFill(highs);
             forwardFill(lows);
             forwardFill(closes);
+            // A filled gap carries the last price forward but no shares traded, so
+            // its volume is zero rather than a repeat of the prior session's volume.
+            for (int i = 0; i < rows; i++) {
+                for (int j = 0; j < cols; j++) {
+                    if (Double.isNaN(volumes[i][j]) && !Double.isNaN(closes[i][j])) {
+                        volumes[i][j] = 0.0;
+                    }
+                }
+            }
         }
 
         int[][] eligibility = new int[rows][cols];
@@ -128,7 +145,7 @@ public final class DailyBars {
             }
         }
 
-        return new DailyBars(dates, symbols, symbolIndex, opens, highs, lows, closes, eligibility);
+        return new DailyBars(dates, symbols, symbolIndex, opens, highs, lows, closes, volumes, eligibility);
     }
 
     private static void forwardFill(double[][] matrix) {
@@ -159,11 +176,14 @@ public final class DailyBars {
             List<DailyCandle> candles = new ArrayList<>();
             for (int i = 0; i < dates.size(); i++) {
                 double open = opens[i][col];
+                double high = highs[i][col];
+                double low = lows[i][col];
                 double close = closes[i][col];
+                double volume = volumes[i][col];
                 if (Double.isNaN(open) && Double.isNaN(close)) {
                     continue;
                 }
-                candles.add(new DailyCandle(dates.get(i), open, open, open, close, 0.0));
+                candles.add(new DailyCandle(dates.get(i), open, high, low, close, volume));
             }
             rebuilt.add(new SymbolDailyCandles(symbol, candles));
         }
@@ -194,6 +214,7 @@ public final class DailyBars {
         double[][] highs = new double[rows][cols];
         double[][] lows = new double[rows][cols];
         double[][] closes = new double[rows][cols];
+        double[][] volumes = new double[rows][cols];
         int[][] eligibility = new int[rows][cols];
 
         for (int i = 0; i < rows; i++) {
@@ -203,11 +224,12 @@ public final class DailyBars {
                 highs[i][j] = this.highs[sourceIdx][j];
                 lows[i][j] = this.lows[sourceIdx][j];
                 closes[i][j] = this.closes[sourceIdx][j];
+                volumes[i][j] = this.volumes[sourceIdx][j];
                 eligibility[i][j] = this.eligibility[sourceIdx][j];
             }
         }
 
-        return new DailyBars(filteredDates, new ArrayList<>(symbols), new HashMap<>(symbolIndex), opens, highs, lows, closes, eligibility);
+        return new DailyBars(filteredDates, new ArrayList<>(symbols), new HashMap<>(symbolIndex), opens, highs, lows, closes, volumes, eligibility);
     }
 
     public DailyBars filterTo(LocalDate endDate) {
@@ -230,6 +252,7 @@ public final class DailyBars {
         double[][] highs = new double[rows][cols];
         double[][] lows = new double[rows][cols];
         double[][] closes = new double[rows][cols];
+        double[][] volumes = new double[rows][cols];
         int[][] eligibility = new int[rows][cols];
 
         for (int i = 0; i < rows; i++) {
@@ -238,11 +261,12 @@ public final class DailyBars {
                 highs[i][j] = this.highs[i][j];
                 lows[i][j] = this.lows[i][j];
                 closes[i][j] = this.closes[i][j];
+                volumes[i][j] = this.volumes[i][j];
                 eligibility[i][j] = this.eligibility[i][j];
             }
         }
 
-        return new DailyBars(filteredDates, new ArrayList<>(symbols), new HashMap<>(symbolIndex), opens, highs, lows, closes, eligibility);
+        return new DailyBars(filteredDates, new ArrayList<>(symbols), new HashMap<>(symbolIndex), opens, highs, lows, closes, volumes, eligibility);
     }
 
     public List<LocalDate> dates() {
@@ -275,6 +299,11 @@ public final class DailyBars {
 
     public double closeAt(int dateIdx, int symbolIdx) {
         return closes[dateIdx][symbolIdx];
+    }
+
+    /** Traded volume; {@link Double#NaN} when unknown, 0 on a forward-filled gap day. */
+    public double volumeAt(int dateIdx, int symbolIdx) {
+        return volumes[dateIdx][symbolIdx];
     }
 
     public int eligibilityAt(int dateIdx, int symbolIdx) {

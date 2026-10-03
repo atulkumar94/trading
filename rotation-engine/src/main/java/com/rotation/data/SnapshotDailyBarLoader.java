@@ -17,7 +17,7 @@ import java.util.Map;
 /**
  * Reads {@code DailyBars} input back from a previously written daily market
  * snapshot CSV (header
- * {@code date,symbol,prev_close,open,high,low,close,return_vs_prev_close}).
+ * {@code date,symbol,prev_close,open,high,low,close,return_vs_prev_close,volume}).
  *
  * <p>This makes the daily market snapshot the single source of truth: the raw
  * data is parsed once to build the snapshot, and every downstream consumer
@@ -52,8 +52,9 @@ public final class SnapshotDailyBarLoader {
                     double high = Double.parseDouble(parts[4].trim());
                     double low = Double.parseDouble(parts[5].trim());
                     double close = Double.parseDouble(parts[6].trim());
+                    double volume = parseVolume(parts);
                     bySymbol.computeIfAbsent(symbol, ignored -> new ArrayList<>())
-                            .add(new DailyCandle(date, open, high, low, close, 0.0));
+                            .add(new DailyCandle(date, open, high, low, close, volume));
                 } catch (RuntimeException ignored) {
                     // skip malformed rows
                 }
@@ -72,5 +73,14 @@ public final class SnapshotDailyBarLoader {
             throw new IllegalArgumentException("No usable rows found in daily market snapshot: " + snapshotFile);
         }
         return series;
+    }
+
+    /** Volume is the optional 9th column; absent or blank reads as NaN (unknown). */
+    private static double parseVolume(String[] parts) {
+        if (parts.length <= 8) {
+            return Double.NaN;
+        }
+        String raw = parts[8].trim();
+        return raw.isEmpty() ? Double.NaN : Double.parseDouble(raw);
     }
 }

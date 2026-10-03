@@ -5,14 +5,17 @@ import com.rotation.data.DailyBarLoader;
 import com.rotation.data.MinuteHistoryDailyBarLoader;
 import com.rotation.data.SectorSymbolsReader;
 import com.rotation.data.SnapshotDailyBarLoader;
-import com.rotation.engine.RotationEngine;
 import com.rotation.job.DailyRefreshJob;
 import com.rotation.job.DailyReportJob;
 import com.rotation.model.DailyBars;
 import com.rotation.model.SymbolDailyCandles;
 import com.rotation.report.CsvExporter;
+import com.rotation.report.BreakoutScanExporter;
 import com.rotation.report.MarketSnapshotExporter;
 import com.rotation.report.MonthlyMarketSnapshotExporter;
+import com.rotation.strategy.Strategies;
+import com.rotation.strategy.breakout.BreakoutConfig;
+import com.rotation.strategy.breakout.BreakoutScanner;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -114,9 +117,14 @@ public final class Main {
         Path dailySnapshot = outputDir.resolve(prefix + "_daily_market_snapshot.csv");
         DailyBars snapshotBars = DailyBars.build(SnapshotDailyBarLoader.load(dailySnapshot), false);
 
+        if (config.mode().equals("scan")) {
+            runScan(config, snapshotBars, outputDir, prefix);
+            return;
+        }
+
         new MonthlyMarketSnapshotExporter().export(snapshotBars, outputDir, prefix);
 
-        var rotationResult = new RotationEngine(config).run(snapshotBars);
+        var rotationResult = Strategies.create(config).run(snapshotBars);
         new CsvExporter().export(rotationResult, outputDir, prefix);
         new DailyReportJob().run(config, snapshotBars, rotationResult);
 
@@ -141,6 +149,25 @@ public final class Main {
     public static void runDailyRefresh(Path configFile) {
         RotationConfig config = RotationConfig.load(configFile, Path.of(System.getProperty("user.dir")));
         new DailyRefreshJob().run(config, Path.of(System.getProperty("user.dir")));
+    }
+
+    /** Run the EOD breakout scan over the latest session and write {prefix}_scan.csv. */
+    private static void runScan(RotationConfig config, DailyBars snapshotBars, Path outputDir, String prefix) {
+        BreakoutConfig breakoutCfg = BreakoutConfig.load(config.sourceFile());
+        List<BreakoutScanner.ScanRow> rows = new BreakoutScanner(breakoutCfg).scan(snapshotBars);
+        Path scanPath = new BreakoutScanExporter().export(rows, outputDir, prefix);
+        java.time.LocalDate asOf = snapshotBars.dates().get(snapshotBars.dateCount() - 1);
+        long entries = rows.stream().filter(r -> r.isEntry).count();
+        System.out.println();
+        System.out.printf(Locale.US, "Breakout scan as of %s: %d cross-ups, %d full entry signal(s)%n",
+                asOf, rows.size(), entries);
+        for (BreakoutScanner.ScanRow r : rows) {
+            if (r.isEntry) {
+                System.out.printf(Locale.US, "  ENTRY  %-12s close=%.2f  adx=%.1f  rank=%.4f%n",
+                        r.symbol, r.close, r.adx, r.rankScore);
+            }
+        }
+        System.out.printf(Locale.US, "Saved breakout scan: %s%n", scanPath);
     }
 
     private static List<String> readSymbols(Path symbolsFile) {

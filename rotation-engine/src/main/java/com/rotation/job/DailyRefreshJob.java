@@ -5,12 +5,12 @@ import com.rotation.data.DailyBarLoader;
 import com.rotation.data.MinuteHistoryDailyBarLoader;
 import com.rotation.data.SectorSymbolsReader;
 import com.rotation.data.SnapshotDailyBarLoader;
-import com.rotation.engine.RotationEngine;
 import com.rotation.model.DailyBars;
 import com.rotation.model.SymbolDailyCandles;
 import com.rotation.report.CsvExporter;
 import com.rotation.report.MarketSnapshotExporter;
 import com.rotation.report.MonthlyMarketSnapshotExporter;
+import com.rotation.strategy.Strategies;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -65,7 +65,7 @@ public final class DailyRefreshJob {
 
         new MonthlyMarketSnapshotExporter().export(snapshotBars, outputDir, prefix);
 
-        var rotationResult = new RotationEngine(config).run(snapshotBars);
+        var rotationResult = Strategies.create(config).run(snapshotBars);
         new CsvExporter().export(rotationResult, outputDir, prefix);
         new DailyReportJob().run(config, snapshotBars, rotationResult);
 

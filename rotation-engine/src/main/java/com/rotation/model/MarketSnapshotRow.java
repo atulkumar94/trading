@@ -12,9 +12,10 @@ public final class MarketSnapshotRow {
     public final double low;
     public final double close;
     public final double returnVsPrevClose;
+    public final double volume;
 
     public MarketSnapshotRow(LocalDate date, String symbol, double prevClose, double open, double high,
-                            double low, double close, double returnVsPrevClose) {
+                            double low, double close, double returnVsPrevClose, double volume) {
         this.date = date;
         this.symbol = symbol;
         this.prevClose = prevClose;
@@ -23,5 +24,6 @@ public final class MarketSnapshotRow {
         this.low = low;
         this.close = close;
         this.returnVsPrevClose = returnVsPrevClose;
+        this.volume = volume;
     }
 }

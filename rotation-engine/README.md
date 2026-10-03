@@ -451,24 +451,71 @@ strategy=momentum
 
 ### Plugging in a new strategy
 
-1. Implement `RotationStrategy` in `com.rotation.strategy` with your own schedule,
-   ranking, and selection rules. A strategy reads its own tunables (e.g. `top.n`,
-   `exit.n`, `lookback.days`, `rebalance.mode`, stop settings, sector settings) from the
-   `RotationConfig` it is constructed with. Supply an `exitPolicy()` only if the strategy
-   uses intra-period exits.
-2. Register it in `RotationStrategies.create(...)` under a new `strategy` name.
+There are two seams, at different levels:
+
+- **Top-level `Strategy`** (`com.rotation.strategy.Strategy`) — a whole, self-contained
+  strategy that takes the daily candles and runs a full backtest (`run(DailyBars)`).
+  This is the plug point the pipeline dispatches to after the candles are built. The
+  momentum rotation strategy is `RotationEngine` (it owns the rotation machinery); a
+  different idea (e.g. a breakout) implements `Strategy` directly and shares none of it.
+- **Rotation's `RotationStrategy`** — the *selection* layer used only *inside* the
+  rotation strategy (schedule + ranking + which symbols to hold, with an optional
+  `exitPolicy()`). This only matters if you are varying the rotation strategy itself.
+
+To add a brand-new strategy (no rotation):
+
+1. Implement `Strategy` in `com.rotation.strategy`, reading its own tunables from the
+   `RotationConfig` it is constructed with.
+2. Register it in `Strategies.create(...)` under a new `strategy` name.
 3. Set `strategy=<yourname>` in [config/rotation.properties](config/rotation.properties) and run.
 
-For quick experiments you can also inject one directly without touching the factory:
+To vary the rotation strategy's selection logic instead, implement `RotationStrategy`,
+register it in `RotationStrategies.create(...)`, and inject it for quick experiments:
 
 ```java
-BacktestResult result = new RotationEngine(config, new MyStrategy(config)).run(bars);
+BacktestResult result = new RotationEngine(config, new MySelection(config)).run(bars);
 ```
 
-Because only the signal layer changes, every output CSV, the daily reports, and
-the portal keep working unchanged.
+Because the top-level seam only swaps which `Strategy` runs, every output CSV, the daily
+reports, and the portal keep working unchanged.
 
-## How to run it
+### The 10 DMA breakout strategy (`strategy=breakout`)
+
+A second, self-contained `Strategy` that shares none of the rotation machinery. It lives in
+`com.rotation.strategy.breakout` and reads only `breakout.*` keys from
+[config/rotation.properties](config/rotation.properties).
+
+- **Entry** (evaluated at the close, filled at the *next* open): the close crosses above
+  SMA10. Optional, individually toggleable quality filters: trend (close > SMA50 and SMA200
+  with a rising SMA50), ADX(14) above a floor, cross-day volume above its trailing average,
+  and a minimum traded-value liquidity screen. Ties are ranked by the stock's own trailing
+  return.
+- **Exit** (strategy-owned): close below SMA10, far-below / consecutive-closes-below SMA10,
+  SMA10 crossing below SMA20, an ATR trailing stop, and an intraday hard stop (gap-downs
+  fill at the open). An optional partial take-profit trims at a configured R multiple.
+- **Sizing**: `breakout.capital`, a `breakout.max.positions` concurrency cap, a
+  `breakout.max.weight.pct` per-position weight cap, and `breakout.cost.bps` baked into the
+  fill price.
+
+It produces the same CSV outputs and portal as momentum, except the per-rebalance
+cross-sectional *rankings* and *lookback* reports are empty (the breakout book has no
+cross-sectional ranking table analog).
+
+### EOD breakout scanner (`mode=scan`)
+
+Setting `mode=scan` runs a read-only, stateless scan over the **latest available session**
+instead of a backtest. It applies the breakout entry rules (always using the `breakout.*`
+config, regardless of the `strategy` key) and reports every symbol whose close crossed above
+SMA10, flagging which ones clear all enabled filters (a full entry signal) and why the rest
+were rejected. It writes `{output.prefix}_scan.csv` and prints a console summary. No trades
+are placed — a signal would fill at the next open, exactly as in the backtest, so the output
+is a next-session watchlist.
+
+`{output.prefix}_scan.csv` columns: `date, symbol, is_entry, trend_ok, adx_ok, volume_ok,
+liquidity_ok, close, sma_fast, sma_mid, sma_slow, adx, atr, volume, avg_volume,
+avg_traded_value, rank_score`. Rows are full entries first, then by `rank_score`.
+
+
 
 From the project root:
 
@@ -489,8 +536,9 @@ This will:
 
 - `Main.java` — entry point
 - `RotationConfig.java` — loads all settings
-- `RotationEngine.java` — core backtesting logic (next-open execution, accounting, running the exit policy, reports)
-- `strategy/RotationStrategy.java` + `MomentumRotationStrategy.java` + `RotationStrategies.java` — the pluggable signal layer (schedule + rank + pick the book)
+- `strategy/Strategy.java` + `Strategies.java` — the top-level plug point: a whole strategy run after the candles are built
+- `RotationEngine.java` — the momentum rotation `Strategy`: core backtesting logic (next-open execution, accounting, running the exit policy, reports)
+- `strategy/RotationStrategy.java` + `MomentumRotationStrategy.java` + `RotationStrategies.java` — rotation's internal signal layer (schedule + rank + pick the book)
 - `strategy/ExitPolicy.java` + `StopLossExitPolicy.java` — optional, strategy-supplied intra-period exit rule
 - `MinuteHistoryDailyBarLoader.java` — loads external daily/history CSVs
 - `CsvExporter.java` — writes CSV reports

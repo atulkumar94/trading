@@ -94,7 +94,8 @@ All settings live in [rotation-engine/config/rotation.properties](rotation-engin
 | `market.sector` | Optional: run on one sector only (e.g. `Healthcare`, case-insensitive, must exist in `sector.file`). Disables `max.per.sector` |
 | `lookback.days` | Momentum lookback in trading sessions |
 | `top.n` / `exit.n` | Names entered / rank threshold before exit |
-| `strategy` | Pluggable signal logic — rebalance schedule, ranking/selection, and optional intra-period exits (default `momentum`); see the engine README's *Pluggable strategy* section to add your own |
+| `strategy` | Pluggable signal logic — rebalance schedule, ranking/selection, and optional intra-period exits (default `momentum`; also `breakout` for the 10 DMA breakout strategy); see the engine README's *Pluggable strategy* section to add your own |
+| `mode` | `backtest` (default) runs the selected strategy; `scan` runs the EOD breakout scanner over the latest session and writes `{output.prefix}_scan.csv` (see the engine README) |
 | `rebalance.mode` | Trading-session cadence after the first rebalance (which runs as soon as the lookback is complete): `weekly` = every 5 sessions, `monthly_twice` = every 10, `monthly` = every 20 |
 | `capital.per.stock`, `allocation.mode`, `monthly.contribution` | Sizing |
 | `stop.loss.pct` / `trailing.stop.pct` | Intra-period exits |

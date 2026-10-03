@@ -5,6 +5,7 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
+import java.util.Locale;
 import java.util.Properties;
 
 /**
@@ -25,6 +26,7 @@ public final class RotationConfig {
     private final String allocationMode;
     private final String rebalanceMode;
     private final String strategy;
+    private final String mode;
     private final String dataPath;
     private final LocalDate startDate;
     private final LocalDate endDate;
@@ -52,6 +54,7 @@ public final class RotationConfig {
         this.allocationMode = stringProp(props, "allocation.mode", "compound");
         this.rebalanceMode = stringProp(props, "rebalance.mode", "monthly_twice");
         this.strategy = stringProp(props, "strategy", "momentum");
+        this.mode = stringProp(props, "mode", "backtest").toLowerCase(Locale.ROOT);
         this.dataPath = stringProp(props, "data.path", "");
         this.startDate = localDateProp(props, "start.date", null);
         this.endDate = localDateProp(props, "end.date", null);
@@ -114,6 +117,9 @@ public final class RotationConfig {
                 && !rebalanceMode.equals("monthly_twice")) {
             throw new IllegalArgumentException(
                     "rebalance.mode must be 'monthly', 'weekly', or 'monthly_twice'.");
+        }
+        if (!mode.equals("backtest") && !mode.equals("scan")) {
+            throw new IllegalArgumentException("mode must be 'backtest' or 'scan'.");
         }
     }
 
@@ -239,6 +245,11 @@ public final class RotationConfig {
     /** Id of the pluggable strategy to run (default 'momentum'); resolved by RotationStrategies. */
     public String strategy() {
         return strategy;
+    }
+
+    /** Pipeline mode: 'backtest' (default) runs the strategy and reports; 'scan' runs the EOD breakout scan. */
+    public String mode() {
+        return mode;
     }
 
     public String outputPrefix() {

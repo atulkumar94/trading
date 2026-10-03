@@ -31,6 +31,7 @@ import com.rotation.strategy.Candidate;
 import com.rotation.strategy.ExitPolicy;
 import com.rotation.strategy.RotationStrategies;
 import com.rotation.strategy.RotationStrategy;
+import com.rotation.strategy.Strategy;
 
 /**
  * Fixed-schedule top-N momentum rotation engine.
@@ -41,7 +42,7 @@ import com.rotation.strategy.RotationStrategy;
  * (>= lookback) of tracked daily bars. Capital either compounds (reinvest the
  * latest portfolio value) or redeploys a fixed principal each period.
  */
-public final class RotationEngine {
+public final class RotationEngine implements Strategy {
 
     private final RotationConfig config;
     private final RebalanceLogger logger = new RebalanceLogger();
@@ -59,6 +60,12 @@ public final class RotationEngine {
         this.exitPolicy = strategy.exitPolicy();
     }
 
+    @Override
+    public String name() {
+        return strategy.name();
+    }
+
+    @Override
     public BacktestResult run(DailyBars bars) {
         int lookbackDays = config.lookbackDays();
         int topN = config.topN();

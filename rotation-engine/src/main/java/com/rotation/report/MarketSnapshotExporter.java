@@ -54,7 +54,8 @@ public final class MarketSnapshotExporter {
                 }
                 double returnPct = ((close / prevClose) - 1.0) * 100.0;
 
-                rows.add(new MarketSnapshotRow(date, symbol, prevClose, open, high, low, close, returnPct));
+                double volume = bars.volumeAt(d, i);
+                rows.add(new MarketSnapshotRow(date, symbol, prevClose, open, high, low, close, returnPct, volume));
             }
         }
 
@@ -63,7 +64,7 @@ public final class MarketSnapshotExporter {
 
     private void writeDailyMarketSnapshot(List<MarketSnapshotRow> rows, Path path) {
         try (Writer w = Files.newBufferedWriter(path)) {
-            w.write("date,symbol,prev_close,open,high,low,close,return_vs_prev_close\n");
+            w.write("date,symbol,prev_close,open,high,low,close,return_vs_prev_close,volume\n");
             for (MarketSnapshotRow row : rows) {
                 w.write(String.join(",",
                         row.date.toString(),
@@ -73,7 +74,8 @@ public final class MarketSnapshotExporter {
                         price(row.high),
                         price(row.low),
                         price(row.close),
-                        num(row.returnVsPrevClose)));
+                        num(row.returnVsPrevClose),
+                        vol(row.volume)));
                 w.write("\n");
             }
         } catch (IOException e) {
@@ -88,5 +90,16 @@ public final class MarketSnapshotExporter {
     /** Full-precision price so the snapshot losslessly stores the DailyBars data. */
     private static String price(double value) {
         return Double.isNaN(value) ? "" : Double.toString(value);
+    }
+
+    /** Volume as a plain integer when whole (the usual case), blank when unknown. */
+    private static String vol(double value) {
+        if (Double.isNaN(value)) {
+            return "";
+        }
+        if (value == Math.rint(value) && !Double.isInfinite(value)) {
+            return Long.toString((long) value);
+        }
+        return Double.toString(value);
     }
 }
