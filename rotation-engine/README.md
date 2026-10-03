@@ -49,6 +49,7 @@ This file controls:
 - the output file prefix
 - optional symbol filtering
 - optional single-sector universe (`market.sector`)
+- the strategy to run (`strategy`, default `momentum`)
 
 The most important setting here is the input path:
 
@@ -405,6 +406,68 @@ This contains the latest 30 trading-day lookback rankings using the current run 
 
 See the root README's *Reporting portal* section for metric definitions and limitations.
 
+## Pluggable strategy
+
+The **signals** — which symbols to hold, when to rebalance, and (optionally) when to
+stop out — are isolated behind a small interface so you can swap the logic without
+touching the engine. The engine owns everything mechanical: next-open execution,
+capital accounting, running the exit policy, and all reporting. The strategy owns the
+rebalance schedule, ranks the universe, picks the book each period, and decides whether
+to supply an exit policy at all.
+
+The interface lives in the `strategy` package:
+
+```java
+public interface RotationStrategy {
+    String name();
+
+    // Rebalance schedule: signal indices (execution is at signalIdx + 1).
+    List<Integer> rebalanceSignals(DailyBars bars, int tradeStartIdx, int minHistory);
+    default String scheduleLabel() { return name() + "-schedule"; }
+
+    // Selection: rank the universe, then pick the book.
+    List<Candidate> rank(DailyBars bars, int signalIdx, int referenceIdx, int minHistory);
+    List<String> selectCore(List<Candidate> ranked);              // always-entered core (top-N)
+    List<String> select(List<Candidate> ranked, Set<String> held); // full book incl. exit buffer
+
+    // Optional intra-period exit rule. Strategies that don't stop out keep the default.
+    default ExitPolicy exitPolicy() { return ExitPolicy.NONE; }
+}
+```
+
+Exit criteria are therefore **strategy-owned but optional**: a strategy returns an
+`ExitPolicy` (e.g. `StopLossExitPolicy` for hard/trailing stops) when it wants intra-period
+exits, or leaves the `ExitPolicy.NONE` default when it does not. The engine simply runs
+whatever policy it is given.
+
+The default implementation is `MomentumRotationStrategy` (trailing-lookback-return
+ranking with the optional sector cap and exit buffer, a fixed-session rebalance cadence
+from `rebalance.mode`, and a `StopLossExitPolicy` built from `stop.loss.pct` /
+`trailing.stop.pct`). It is selected by the config key:
+
+```text
+strategy=momentum
+```
+
+### Plugging in a new strategy
+
+1. Implement `RotationStrategy` in `com.rotation.strategy` with your own schedule,
+   ranking, and selection rules. A strategy reads its own tunables (e.g. `top.n`,
+   `exit.n`, `lookback.days`, `rebalance.mode`, stop settings, sector settings) from the
+   `RotationConfig` it is constructed with. Supply an `exitPolicy()` only if the strategy
+   uses intra-period exits.
+2. Register it in `RotationStrategies.create(...)` under a new `strategy` name.
+3. Set `strategy=<yourname>` in [config/rotation.properties](config/rotation.properties) and run.
+
+For quick experiments you can also inject one directly without touching the factory:
+
+```java
+BacktestResult result = new RotationEngine(config, new MyStrategy(config)).run(bars);
+```
+
+Because only the signal layer changes, every output CSV, the daily reports, and
+the portal keep working unchanged.
+
 ## How to run it
 
 From the project root:
@@ -426,7 +489,9 @@ This will:
 
 - `Main.java` — entry point
 - `RotationConfig.java` — loads all settings
-- `RotationEngine.java` — core backtesting logic
+- `RotationEngine.java` — core backtesting logic (next-open execution, accounting, running the exit policy, reports)
+- `strategy/RotationStrategy.java` + `MomentumRotationStrategy.java` + `RotationStrategies.java` — the pluggable signal layer (schedule + rank + pick the book)
+- `strategy/ExitPolicy.java` + `StopLossExitPolicy.java` — optional, strategy-supplied intra-period exit rule
 - `MinuteHistoryDailyBarLoader.java` — loads external daily/history CSVs
 - `CsvExporter.java` — writes CSV reports
 - `DailyValuationBuilder.java` / `ReportReconciler.java` / `PerformanceCalculator.java` — daily accounting, reconciliation, range metrics

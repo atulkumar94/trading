@@ -1,15 +1,5 @@
 package com.rotation.report;
 
-import com.rotation.config.RotationConfig;
-import com.rotation.engine.RotationEngine;
-import com.rotation.model.BacktestResult;
-import com.rotation.model.DailyBars;
-import com.rotation.model.DailyPortfolioRow;
-import com.rotation.model.DailyValuation;
-import com.rotation.model.RangeMetrics;
-import com.rotation.model.ReconciliationReport;
-import com.rotation.model.TradeLedgerRow;
-
 import java.nio.file.Path;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
@@ -17,6 +7,16 @@ import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
+
+import com.rotation.config.RotationConfig;
+import com.rotation.model.BacktestResult;
+import com.rotation.model.DailyBars;
+import com.rotation.model.DailyPortfolioRow;
+import com.rotation.model.DailyValuation;
+import com.rotation.model.RangeMetrics;
+import com.rotation.model.ReconciliationReport;
+import com.rotation.model.TradeLedgerRow;
+import com.rotation.strategy.MomentumRotationStrategy;
 
 /**
  * Builds the run manifest JSON: the strategy configuration, data coverage,
@@ -66,7 +66,7 @@ public final class RunManifestBuilder {
         j.field("exit_n", config.exitN());
         j.field("effective_exit_n", config.effectiveExitN());
         j.field("rebalance_mode", config.rebalanceMode());
-        j.field("rebalance_interval_sessions", RotationEngine.rebalanceIntervalSessions(config.rebalanceMode()));
+        j.field("rebalance_interval_sessions", MomentumRotationStrategy.rebalanceIntervalSessions(config.rebalanceMode()));
         j.field("allocation_mode", config.allocationMode());
         j.field("capital_per_stock", config.capitalPerStock(), 2);
         j.field("initial_capital", result.initialCapital(), 2);

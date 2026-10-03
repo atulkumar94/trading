@@ -14,7 +14,7 @@ filter (end.date / symbols.file / market.sector) — full history kept for lookb
 rotation_daily_market_snapshot.csv   ← single source of truth
     ↓  SnapshotDailyBarLoader (reload)
     ├─→ MonthlyMarketSnapshotExporter → rotation_monthly_market_snapshot.csv
-    └─→ RotationEngine (trades from start.date) → CsvExporter → rebalances / equity / performance /
+    └─→ RotationEngine (trades from start.date; RotationStrategy picks the book) → CsvExporter → rebalances / equity / performance /
                                         │               tradebook / holdings / lookback / yearly
                                         └─→ DailyReportJob → daily_portfolio / daily_positions / trade_ledger
                                                            → run_manifest.json (config, coverage, checks)
@@ -42,6 +42,7 @@ stocksData/
         │   ├── config/                ← RotationConfig
         │   ├── data/                  ← Loaders (MinuteHistory, Snapshot)
         │   ├── engine/                ← RotationEngine
+        │   ├── strategy/              ← Pluggable selection (RotationStrategy, MomentumRotationStrategy)
         │   ├── job/                   ← DailyRefreshJob
         │   ├── model/                 ← Immutable data models (DailyBars, …)
         │   └── report/                ← CSV exporters
@@ -93,6 +94,7 @@ All settings live in [rotation-engine/config/rotation.properties](rotation-engin
 | `market.sector` | Optional: run on one sector only (e.g. `Healthcare`, case-insensitive, must exist in `sector.file`). Disables `max.per.sector` |
 | `lookback.days` | Momentum lookback in trading sessions |
 | `top.n` / `exit.n` | Names entered / rank threshold before exit |
+| `strategy` | Pluggable signal logic — rebalance schedule, ranking/selection, and optional intra-period exits (default `momentum`); see the engine README's *Pluggable strategy* section to add your own |
 | `rebalance.mode` | Trading-session cadence after the first rebalance (which runs as soon as the lookback is complete): `weekly` = every 5 sessions, `monthly_twice` = every 10, `monthly` = every 20 |
 | `capital.per.stock`, `allocation.mode`, `monthly.contribution` | Sizing |
 | `stop.loss.pct` / `trailing.stop.pct` | Intra-period exits |

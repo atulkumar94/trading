@@ -22,7 +22,8 @@ This is a data pipeline project. Our goal is:
 
 - **Reliable data download** (Python: yfinance → CSVs)
 - **Consistent data transformation** (Java: load → normalize → filter → snapshot)
-- **Accurate backtest reporting** (Java: momentum ranking → P&L → CSV export)
+- **Accurate backtest reporting** (Java: strategy selection → P&L → CSV export; the default
+  strategy is momentum ranking, swappable behind `RotationStrategy`)
 
 **NOT our goal:**
 - Building a trading execution system
@@ -45,6 +46,10 @@ If a request conflicts with this focus, ask the user to clarify alignment with t
 - All models are immutable (use `final` fields, no setters)
 - Keep `Main.java` as an orchestration entry point; do not add business logic there
 - Loaders return models; exporters write files; logic lives in the engine
+- The signal logic lives in the `strategy` package behind `RotationStrategy`: the
+  strategy owns the rebalance schedule, ranks/selects the book, and optionally supplies
+  an `ExitPolicy` (intra-period stops). The engine owns next-open execution, accounting,
+  running the supplied exit policy, and reporting
 - One responsibility per class (separation of concerns)
 - Write tests for complex logic (e.g., ranking, P&L calculation)
 
@@ -74,6 +79,8 @@ If a request conflicts with this focus, ask the user to clarify alignment with t
 ### Edit Java code when:
 - Fixing bugs in core logic
 - Adding a new data loader or exporter
+- Adding or swapping a strategy: implement `RotationStrategy` in the `strategy` package,
+  register it in `RotationStrategies`, and select it with the `strategy` config key
 - Improving performance
 - User explicitly asks for a feature
 
@@ -149,6 +156,9 @@ Maintain alignment:
 - `README.md` describes the data flow
 - `config/rotation.properties` is the single config source
 - `Main.java` orchestrates; doesn't contain logic
+- Strategy signals live in the `strategy` package (behind `RotationStrategy`): schedule,
+  ranking/selection, and an optional `ExitPolicy`. The engine owns next-open execution,
+  accounting, running the exit policy, and reporting
 - All loaders and exporters follow the same pattern
 - All tests cover the happy path and edge cases
 

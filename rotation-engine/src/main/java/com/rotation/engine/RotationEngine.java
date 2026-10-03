@@ -1,5 +1,17 @@
 package com.rotation.engine;
 
+import java.time.LocalDate;
+import java.time.YearMonth;
+import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.TreeSet;
+
 import com.rotation.config.RotationConfig;
 import com.rotation.model.BacktestResult;
 import com.rotation.model.DailyBars;
@@ -15,25 +27,10 @@ import com.rotation.model.RebalanceRecord;
 import com.rotation.model.TradebookRow;
 import com.rotation.model.YearEndEquity;
 import com.rotation.report.RebalanceLogger;
-
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.UncheckedIOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.time.LocalDate;
-import java.time.YearMonth;
-import java.time.temporal.ChronoUnit;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
-import java.util.TreeSet;
+import com.rotation.strategy.Candidate;
+import com.rotation.strategy.ExitPolicy;
+import com.rotation.strategy.RotationStrategies;
+import com.rotation.strategy.RotationStrategy;
 
 /**
  * Fixed-schedule top-N momentum rotation engine.
@@ -48,15 +45,18 @@ public final class RotationEngine {
 
     private final RotationConfig config;
     private final RebalanceLogger logger = new RebalanceLogger();
-    private final int maxPerSector;
-    private final Map<String, String> sectorBySymbol;
+    private final RotationStrategy strategy;
+    private final ExitPolicy exitPolicy;
 
     public RotationEngine(RotationConfig config) {
+        this(config, RotationStrategies.create(config));
+    }
+
+    /** Run with an explicitly supplied strategy (bypasses the {@code strategy} config key). */
+    public RotationEngine(RotationConfig config, RotationStrategy strategy) {
         this.config = config;
-        this.maxPerSector = config.maxPerSector();
-        this.sectorBySymbol = maxPerSector > 0
-                ? loadSectorMap(config.resolveSectorFile())
-                : Collections.emptyMap();
+        this.strategy = strategy;
+        this.exitPolicy = strategy.exitPolicy();
     }
 
     public BacktestResult run(DailyBars bars) {
@@ -83,8 +83,8 @@ public final class RotationEngine {
         // Fixed trading-session cadence (rebalance.mode), anchored on the first session
         // with a complete lookback. Each decision is ranked on the prior session's close
         // and executed at the next open, so switches happen before the day trades.
-        String scheduleLabel = scheduleLabel(config.rebalanceMode());
-        List<Integer> rebalancePoints = computeRebalanceSignalIndices(bars, tradeStartIdx, lookbackDays, minHistory);
+        String scheduleLabel = strategy.scheduleLabel();
+        List<Integer> rebalancePoints = strategy.rebalanceSignals(bars, tradeStartIdx, minHistory);
         if (rebalancePoints.isEmpty()) {
             throw new IllegalArgumentException("Not enough observations to run the requested rebalance schedule.");
         }
@@ -204,23 +204,23 @@ public final class RotationEngine {
             // --- 2. Rank the eligible universe and pick the book. Always enter the
             //        top-N; when exit.n > top.n, retain currently-held names until they
             //        fall out of the top exit.n (the book may grow up to exit.n). ---
-            List<Candidate> ranked = rankUniverse(bars, signalIdx, referenceIdx, minHistory);
-            List<String> selected = selectHoldings(ranked, holdings.keySet(), topN, exitN);
+            List<Candidate> ranked = strategy.rank(bars, signalIdx, referenceIdx, minHistory);
+            List<String> selected = strategy.select(ranked, holdings.keySet());
             TreeSet<String> selectedSet = new TreeSet<>(selected);
             Map<String, Integer> rankBySymbol = new HashMap<>();
             for (int i = 0; i < ranked.size(); i++) {
                 rankBySymbol.put(ranked.get(i).symbol, i + 1);
             }
             // The sector-capped top-N cut (always entered); anything else selected is an exit buffer hold.
-            HashSet<String> topNSelection = new HashSet<>(selectTopN(ranked, topN));
+            HashSet<String> topNSelection = new HashSet<>(strategy.selectCore(ranked));
 
             List<PerformanceRow> performanceTable = new ArrayList<>();
             LocalDate lookbackStart = referenceIdx >= 0 ? dates.get(referenceIdx) : null;
             for (int i = 0; i < ranked.size(); i++) {
                 Candidate c = ranked.get(i);
                 PerformanceRow row = new PerformanceRow(rebalanceNumber, signalDate, executionDate,
-                        lookbackStart, i + 1, c.symbol, c.lookbackPrice, c.currentPrice,
-                        c.returnPct, c.historyDays, selectedSet.contains(c.symbol));
+                        lookbackStart, i + 1, c.symbol, c.referencePrice, c.currentPrice,
+                        c.score, c.historyDays, selectedSet.contains(c.symbol));
                 performanceTable.add(row);
                 performanceRows.add(row);
             }
@@ -585,28 +585,6 @@ public final class RotationEngine {
         return snapshot.accountEquity + markPeriodPnl;
     }
 
-    static final String MODE_MONTHLY = "monthly";
-    static final String MODE_WEEKLY = "weekly";
-    static final String MODE_MONTHLY_TWICE = "monthly_twice";
-
-    /** Trading sessions between consecutive rebalances for a rebalance.mode. */
-    public static int rebalanceIntervalSessions(String mode) {
-        switch (mode) {
-            case MODE_WEEKLY:
-                return 5;
-            case MODE_MONTHLY_TWICE:
-                return 10;
-            case MODE_MONTHLY:
-                return 20;
-            default:
-                throw new IllegalArgumentException("Unknown rebalance.mode: " + mode);
-        }
-    }
-
-    private static String scheduleLabel(String mode) {
-        return mode + "@every-" + rebalanceIntervalSessions(mode) + "-sessions";
-    }
-
     /**
      * Index of the first session on/after {@code startDate} (0 when unset). Earlier
      * sessions only feed the lookback window and eligibility counts.
@@ -623,181 +601,6 @@ public final class RotationEngine {
         throw new IllegalArgumentException("No data available on/after start date: " + startDate);
     }
 
-    /**
-     * Signal indices (execution is at {@code signalIdx + 1}). The first signal is the
-     * earliest session, no earlier than the one before the start date, whose lookback
-     * window is complete and has at least one eligible symbol. Each later signal is
-     * {@link #rebalanceIntervalSessions} trading sessions after the previous one.
-     */
-    private List<Integer> computeRebalanceSignalIndices(DailyBars bars, int tradeStartIdx,
-                                                        int lookbackDays, int minHistory) {
-        int interval = rebalanceIntervalSessions(config.rebalanceMode());
-        int lastSignal = bars.dateCount() - 2;
-        int first = Math.max(tradeStartIdx - 1, lookbackDays - 1);
-        while (first <= lastSignal
-                && rankUniverse(bars, first, first - (lookbackDays - 1), minHistory).isEmpty()) {
-            first++;
-        }
-        List<Integer> signalIndices = new ArrayList<>();
-        for (int signal = first; signal <= lastSignal; signal += interval) {
-            signalIndices.add(signal);
-        }
-        return signalIndices;
-    }
-
-    /**
-     * Build the book for a rebalance. The top-N names (sector-capped) are always entered.
-     * When {@code exitN > topN} the book additionally retains any currently-held name that
-     * still ranks within the top {@code exitN} by momentum, so a holding is only dropped once
-     * it falls out of the top {@code exitN} (never merely because it left the top-N). The book
-     * is capped at {@code exitN} names and the sector cap is honoured when retaining buffers,
-     * so two same-sector names never coexist. When {@code exitN == topN} this reduces to a
-     * plain sector-capped top-N cut (legacy behaviour).
-     */
-    private List<String> selectHoldings(List<Candidate> ranked, java.util.Set<String> currentHoldings,
-                                        int topN, int exitN) {
-        List<String> selected = selectTopN(ranked, topN);
-        if (exitN <= topN) {
-            return selected;
-        }
-        selected = new ArrayList<>(selected);
-        Map<String, Integer> perSector = new HashMap<>();
-        for (String symbol : selected) {
-            String sector = sectorBySymbol.get(symbol);
-            if (sector != null) {
-                perSector.merge(sector, 1, Integer::sum);
-            }
-        }
-        int limit = Math.min(exitN, ranked.size());
-        for (int i = 0; i < limit && selected.size() < exitN; i++) {
-            Candidate c = ranked.get(i);
-            if (!currentHoldings.contains(c.symbol) || selected.contains(c.symbol)) {
-                continue; // only previously-held names may fill the buffer beyond the top-N
-            }
-            String sector = sectorBySymbol.get(c.symbol);
-            if (maxPerSector > 0 && sector != null && perSector.getOrDefault(sector, 0) >= maxPerSector) {
-                continue;
-            }
-            selected.add(c.symbol);
-            if (sector != null) {
-                perSector.merge(sector, 1, Integer::sum);
-            }
-        }
-        return selected;
-    }
-
-    /**
-     * Pick the top {@code topN} symbols from the ranked list, optionally capping how many
-     * may come from a single sector. The cap keeps two highly-correlated same-theme names
-     * out of a concentrated book: it takes the highest-ranked eligible symbol per sector
-     * first and, only if that starves us of names, backfills with the next best regardless
-     * of sector so a slot is never left empty. Symbols with no sector mapping are never
-     * capped. When the cap is disabled (or no map is loaded) this is a plain top-N cut.
-     */
-    private List<String> selectTopN(List<Candidate> ranked, int topN) {
-        if (maxPerSector <= 0 || sectorBySymbol.isEmpty()) {
-            List<String> plain = new ArrayList<>();
-            for (int i = 0; i < Math.min(topN, ranked.size()); i++) {
-                plain.add(ranked.get(i).symbol);
-            }
-            return plain;
-        }
-        List<String> selected = new ArrayList<>();
-        Map<String, Integer> perSector = new HashMap<>();
-        for (Candidate c : ranked) {
-            if (selected.size() >= topN) {
-                break;
-            }
-            String sector = sectorBySymbol.get(c.symbol);
-            if (sector != null && perSector.getOrDefault(sector, 0) >= maxPerSector) {
-                continue;
-            }
-            selected.add(c.symbol);
-            if (sector != null) {
-                perSector.merge(sector, 1, Integer::sum);
-            }
-        }
-        if (selected.size() < topN) {
-            for (Candidate c : ranked) {
-                if (selected.size() >= topN) {
-                    break;
-                }
-                if (!selected.contains(c.symbol)) {
-                    selected.add(c.symbol);
-                }
-            }
-        }
-        return selected;
-    }
-
-    /** Load a {@code symbol -> sector} map from a CSV with 'symbol' and 'sector' columns. */
-    private static Map<String, String> loadSectorMap(Path file) {
-        Map<String, String> map = new HashMap<>();
-        if (file == null || !Files.exists(file)) {
-            return map;
-        }
-        try (BufferedReader reader = Files.newBufferedReader(file)) {
-            String header = reader.readLine();
-            if (header == null) {
-                return map;
-            }
-            String[] cols = header.split(",");
-            int symCol = -1;
-            int secCol = -1;
-            for (int i = 0; i < cols.length; i++) {
-                String h = cols[i].trim();
-                if (h.equalsIgnoreCase("symbol")) {
-                    symCol = i;
-                } else if (h.equalsIgnoreCase("sector")) {
-                    secCol = i;
-                }
-            }
-            if (symCol < 0 || secCol < 0) {
-                throw new IllegalArgumentException(
-                        "Sector file must include 'symbol' and 'sector' columns: " + file);
-            }
-            String line;
-            while ((line = reader.readLine()) != null) {
-                String[] parts = line.split(",", -1);
-                if (parts.length > Math.max(symCol, secCol)) {
-                    String symbol = parts[symCol].trim();
-                    String sector = parts[secCol].trim();
-                    if (!symbol.isEmpty() && !sector.isEmpty()) {
-                        map.put(symbol, sector);
-                    }
-                }
-            }
-        } catch (IOException e) {
-            throw new UncheckedIOException("Unable to read sector file: " + file, e);
-        }
-        return map;
-    }
-
-    /** Rank all eligible symbols by trailing lookback return (desc), ties by symbol (asc). */
-    private List<Candidate> rankUniverse(DailyBars bars, int signalIdx, int referenceIdx, int minHistory) {
-        List<Candidate> candidates = new ArrayList<>();
-        if (referenceIdx < 0) {
-            return candidates; // insufficient history for everyone (guaranteed cash period)
-        }
-        List<String> symbols = bars.symbols();
-        for (int s = 0; s < symbols.size(); s++) {
-            double current = bars.closeAt(signalIdx, s);
-            double lookback = bars.closeAt(referenceIdx, s);
-            int history = bars.eligibilityAt(signalIdx, s);
-            boolean eligible = !Double.isNaN(current) && !Double.isNaN(lookback)
-                    && lookback > 0 && history >= minHistory;
-            if (!eligible) {
-                continue;
-            }
-            double returnPct = ((current / lookback) - 1.0) * 100.0;
-            candidates.add(new Candidate(symbols.get(s), returnPct, lookback, current, history));
-        }
-        candidates.sort(Comparator
-                .comparingDouble((Candidate c) -> c.returnPct).reversed()
-                .thenComparing(c -> c.symbol));
-        return candidates;
-    }
-
     private List<LookbackRow> buildLookbackRows(DailyBars bars, int lookbackDays, int minHistory, int topN) {
         List<LookbackRow> rows = new ArrayList<>();
         List<LocalDate> dates = bars.dates();
@@ -808,7 +611,7 @@ public final class RotationEngine {
         int startSignalIdx = Math.max(lookbackDays - 1, dates.size() - 30);
         for (int signalIdx = startSignalIdx; signalIdx < dates.size(); signalIdx++) {
             int referenceIdx = signalIdx - (lookbackDays - 1);
-            List<Candidate> ranked = rankUniverse(bars, signalIdx, referenceIdx, minHistory);
+            List<Candidate> ranked = strategy.rank(bars, signalIdx, referenceIdx, minHistory);
             LocalDate signalDate = dates.get(signalIdx);
             LocalDate lookbackStart = referenceIdx >= 0 ? dates.get(referenceIdx) : null;
             LocalDate executionDate = signalIdx + 1 < dates.size() ? dates.get(signalIdx + 1) : null;
@@ -816,22 +619,22 @@ public final class RotationEngine {
             for (int i = 0; i < ranked.size(); i++) {
                 Candidate candidate = ranked.get(i);
                 rows.add(new LookbackRow(signalDate, executionDate, lookbackStart, i + 1,
-                        candidate.symbol, candidate.lookbackPrice, candidate.currentPrice,
-                        candidate.returnPct, candidate.historyDays, i < topN));
+                        candidate.symbol, candidate.referencePrice, candidate.currentPrice,
+                        candidate.score, candidate.historyDays, i < topN));
             }
         }
         return rows;
     }
 
     /**
-     * Apply the configured stop-loss / trailing-stop rules to the current holdings
-     * for each trading day in {@code [fromIdx, toIdxInclusive]}. A position is flagged
-     * the first day its <em>close</em> breaches the stop level and is then sold at the
-     * <em>next</em> session's open (never same-day), so the rule reacts to confirmed
-     * end-of-day weakness rather than intraday noise. Proceeds are credited to cash and
-     * a {@code STOP} tradebook row emitted. The passed maps are mutated in place; the
-     * returned {@link StopResult} carries the updated cash, the realized P&L (measured
-     * from the period entry basis) and the cost basis removed from {@code deployedCapital}.
+     * Apply the strategy's {@link ExitPolicy} to the current holdings for each trading
+     * day in {@code [fromIdx, toIdxInclusive]}. A position is flagged the first day its
+     * <em>close</em> breaches the policy's stop level and is then sold at the <em>next</em>
+     * session's open (never same-day), so the rule reacts to confirmed end-of-day weakness
+     * rather than intraday noise. Proceeds are credited to cash and a {@code STOP} tradebook
+     * row emitted. The passed maps are mutated in place; the returned {@link StopResult}
+     * carries the updated cash, the realized P&L (measured from the period entry basis) and
+     * the cost basis removed from {@code deployedCapital}.
      */
     private StopResult applyStops(DailyBars bars, int fromIdx, int toIdxInclusive, List<LocalDate> dates,
                                   Map<String, Double> holdings, Map<String, Double> stopBasis,
@@ -840,9 +643,7 @@ public final class RotationEngine {
                                   List<TradebookRow> tradebookRows, List<LedgerFill> fills) {
         StopResult result = new StopResult();
         result.cash = startingCash;
-        double stopLossPct = config.stopLossPct();
-        double trailingStopPct = config.trailingStopPct();
-        if ((stopLossPct <= 0.0 && trailingStopPct <= 0.0) || holdings.isEmpty()) {
+        if (!exitPolicy.active() || holdings.isEmpty()) {
             return result;
         }
         List<String> symbols = bars.symbols();
@@ -865,20 +666,10 @@ public final class RotationEngine {
                 // Trailing peak tracks the highest CLOSE through the prior session; the
                 // stop is evaluated against today's close, so nothing exits on its own bar.
                 double peak = peakPrices.getOrDefault(symbol, basis);
-                double stopLevel = Double.NEGATIVE_INFINITY;
-                double hardLevel = Double.NEGATIVE_INFINITY;
-                if (stopLossPct > 0.0) {
-                    hardLevel = basis * (1.0 - stopLossPct / 100.0);
-                    stopLevel = Math.max(stopLevel, hardLevel);
-                }
-                if (trailingStopPct > 0.0) {
-                    stopLevel = Math.max(stopLevel, peak * (1.0 - trailingStopPct / 100.0));
-                }
                 double close = bars.closeAt(d, col);
-                boolean breached = stopLevel != Double.NEGATIVE_INFINITY
-                        && !Double.isNaN(close) && close <= stopLevel;
+                ExitPolicy.Trigger trigger = exitPolicy.evaluate(basis, peak, close);
                 double fillOpen = canFill ? bars.openAt(fillIdx, col) : Double.NaN;
-                if (!breached || !canFill || Double.isNaN(fillOpen)) {
+                if (trigger == null || !canFill || Double.isNaN(fillOpen)) {
                     if (!Double.isNaN(close) && close > peak) {
                         peakPrices.put(symbol, close); // roll the peak forward on today's close
                     }
@@ -895,15 +686,10 @@ public final class RotationEngine {
                 tradebookRows.add(new TradebookRow(dates.get(fillIdx), "STOP", symbol, qty, fillOpen,
                         round2(proceeds), entry, fillOpen, round2(reportedPnl), round2(before),
                         round2(result.cash), dates.get(d), owningRebalanceNumber));
-                String rule = hardLevel >= stopLevel
-                        ? String.format(Locale.US, "Stop-loss %.2f%% below period entry %.2f",
-                                stopLossPct, basis)
-                        : String.format(Locale.US, "Trailing stop %.2f%% below peak close %.2f",
-                                trailingStopPct, peak);
                 fills.add(new LedgerFill(dates.get(fillIdx), dates.get(d), owningRebalanceNumber,
                         LedgerFill.STOP, symbol, qty, fillOpen,
                         String.format(Locale.US, "%s: close %.2f <= stop %.2f on %s; filled next open",
-                                rule, close, stopLevel, dates.get(d))));
+                                trigger.rule, close, trigger.stopLevel, dates.get(d))));
                 holdings.remove(symbol);
                 stopBasis.remove(symbol);
                 peakPrices.remove(symbol);
@@ -969,22 +755,6 @@ public final class RotationEngine {
             this.peakPrices = peakPrices;
             this.entryPrices = entryPrices;
             this.rebalanceNumber = rebalanceNumber;
-        }
-    }
-
-    private static final class Candidate {
-        final String symbol;
-        final double returnPct;
-        final double lookbackPrice;
-        final double currentPrice;
-        final int historyDays;
-
-        Candidate(String symbol, double returnPct, double lookbackPrice, double currentPrice, int historyDays) {
-            this.symbol = symbol;
-            this.returnPct = returnPct;
-            this.lookbackPrice = lookbackPrice;
-            this.currentPrice = currentPrice;
-            this.historyDays = historyDays;
         }
     }
 }

@@ -24,6 +24,7 @@ public final class RotationConfig {
     private final int minHistoryDays;
     private final String allocationMode;
     private final String rebalanceMode;
+    private final String strategy;
     private final String dataPath;
     private final LocalDate startDate;
     private final LocalDate endDate;
@@ -50,6 +51,7 @@ public final class RotationConfig {
         this.minHistoryDays = intProp(props, "min.history.days", 2);
         this.allocationMode = stringProp(props, "allocation.mode", "compound");
         this.rebalanceMode = stringProp(props, "rebalance.mode", "monthly_twice");
+        this.strategy = stringProp(props, "strategy", "momentum");
         this.dataPath = stringProp(props, "data.path", "");
         this.startDate = localDateProp(props, "start.date", null);
         this.endDate = localDateProp(props, "end.date", null);
@@ -232,6 +234,11 @@ public final class RotationConfig {
 
     public String rebalanceMode() {
         return rebalanceMode;
+    }
+
+    /** Id of the pluggable strategy to run (default 'momentum'); resolved by RotationStrategies. */
+    public String strategy() {
+        return strategy;
     }
 
     public String outputPrefix() {
