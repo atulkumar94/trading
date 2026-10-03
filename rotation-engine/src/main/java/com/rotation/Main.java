@@ -1,5 +1,14 @@
 package com.rotation;
 
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+
 import com.rotation.config.RotationConfig;
 import com.rotation.data.DailyBarLoader;
 import com.rotation.data.MinuteHistoryDailyBarLoader;
@@ -9,22 +18,13 @@ import com.rotation.job.DailyRefreshJob;
 import com.rotation.job.DailyReportJob;
 import com.rotation.model.DailyBars;
 import com.rotation.model.SymbolDailyCandles;
-import com.rotation.report.CsvExporter;
 import com.rotation.report.BreakoutScanExporter;
+import com.rotation.report.CsvExporter;
 import com.rotation.report.MarketSnapshotExporter;
 import com.rotation.report.MonthlyMarketSnapshotExporter;
 import com.rotation.strategy.Strategies;
 import com.rotation.strategy.breakout.BreakoutConfig;
 import com.rotation.strategy.breakout.BreakoutScanner;
-
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.UncheckedIOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Locale;
 
 /** Entry point: load config, build daily bars, run the rotation backtest, export results. */
 public final class Main {

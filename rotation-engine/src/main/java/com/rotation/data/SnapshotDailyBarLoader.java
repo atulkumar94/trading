@@ -1,8 +1,5 @@
 package com.rotation.data;
 
-import com.rotation.model.DailyCandle;
-import com.rotation.model.SymbolDailyCandles;
-
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -13,6 +10,9 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+
+import com.rotation.model.DailyCandle;
+import com.rotation.model.SymbolDailyCandles;
 
 /**
  * Reads {@code DailyBars} input back from a previously written daily market

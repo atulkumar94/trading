@@ -1,9 +1,5 @@
 package com.rotation.report;
 
-import com.rotation.model.DailyBars;
-import com.rotation.model.MarketSnapshotRow;
-import com.rotation.model.SymbolDailyCandles;
-
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.io.Writer;
@@ -13,6 +9,9 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+
+import com.rotation.model.DailyBars;
+import com.rotation.model.MarketSnapshotRow;
 
 /** Exports a daily market snapshot for each symbol across all dates. */
 public final class MarketSnapshotExporter {

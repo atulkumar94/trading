@@ -1,7 +1,5 @@
 package com.rotation.report;
 
-import com.rotation.strategy.breakout.BreakoutScanner.ScanRow;
-
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.io.Writer;
@@ -10,6 +8,8 @@ import java.nio.file.Path;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Locale;
+
+import com.rotation.strategy.breakout.BreakoutScanner.ScanRow;
 
 /** Writes {@code {prefix}_scan.csv}: the latest-session breakout cross-up scan. */
 public final class BreakoutScanExporter {
