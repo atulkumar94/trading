@@ -121,6 +121,36 @@ All in `rotation-engine/output/rotation/` with prefix `rotation`:
 - `_run_manifest.json` — configuration, data coverage, valuation conventions, output row counts, reconciliation results and data-quality warnings for the run
 - `_portal.html` — the reporting portal (see below; skip with `portal.enabled=false`)
 
+## Momentum Baseline
+
+The rotation engine's Phase 0 reference reports are stored in
+`rotation-engine/baseline/momentum/`. The fixed window trades from 2024-01-01
+through 2026-09-30; the long window starts 2010-01-01 and has the same end date.
+Both pinned configs retain the current momentum settings and use the daily stock
+files in `stocks/daily/`.
+
+From `rotation-engine/`, regenerate either window with:
+
+```bash
+mvn test
+java -cp target/classes com.rotation.Main --config baseline/momentum/fixed.properties
+java -cp target/classes com.rotation.Main --config baseline/momentum/long.properties
+```
+
+The comparison utility checks equity, tradebook, holdings, trade ledger, daily
+portfolio, yearly, and rebalance CSVs. It validates headers and column order,
+row counts, exact text fields, and numeric values within `1e-9`:
+
+```bash
+python3 ../scripts/rotation-engine/BaselineCompare.py compare \
+    baseline/momentum/fixed-window output/baseline-capture-fixed
+python3 ../scripts/rotation-engine/BaselineCompare.py compare \
+    baseline/momentum/long-window output/baseline-capture-long
+```
+
+Run manifests and portals are not baseline-compared: manifests include run-time
+metadata, and portals embed the full market history.
+
 ## Reporting portal
 
 `rotation_portal.html` is a single, read-only HTML file written by every engine run (default and

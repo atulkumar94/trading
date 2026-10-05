@@ -1,28 +1,29 @@
 # Rotation Engine
 
-This project is a daily market snapshot and reporting engine for stock data.
+This project builds daily market snapshots, runs the momentum rotation backtest, and exports its reports.
 
 In simple terms, it does this:
 
 1. Reads historical daily stock data from the configured folder.
-2. Builds a clean daily OHLCV dataset for each symbol.
-3. Keeps the full history for lookback warm-up and starts trading from the configured start date.
-4. Exports a daily market snapshot with one row per symbol per day.
-5. Builds a monthly market snapshot with one row per symbol per month.
-6. Can also be run as a dedicated daily refresh job to regenerate the snapshot files from the latest historical data.
+2. Builds aligned daily bars, applies the configured date and universe filters, and exports a daily snapshot.
+3. Reloads that snapshot as the market-data source for the monthly snapshot and momentum backtest.
+4. Simulates signal-at-close, next-session-open entries, exits, and stop fills from the configured start date.
+5. Exports rotation reports, daily portfolio and position valuations, the trade ledger, and a run manifest.
+6. Can also run as a daily refresh job to regenerate the snapshots and reports.
 
-This is not a trade-execution engine anymore. It is a market-data preparation and reporting engine.
+This is an offline batch backtest pipeline. It simulates fills for reporting; it does not submit brokerage orders or consume real-time feeds.
 
 ---
 
 ## What this project is for
 
-The main goal is to create data snapshots from stock history so you can analyze:
+The pipeline creates market snapshots and backtest reports so you can analyze:
 
 - daily price movement
 - return vs previous close
 - monthly rollups
-- yearly aggregate summaries
+- yearly aggregate summaries and equity
+- rebalance rankings, holdings, trades, and daily portfolio valuation
 - a standard market snapshot output for downstream analytics
 
 The engine is designed around a simple idea:
@@ -238,9 +239,7 @@ The active goal is:
 - yearly reporting summaries
 - data preparation for a scheduled market monitoring pipeline
 
-So the current architecture is intentionally a daily reporting engine with a refresh workflow, rather than a strategy execution engine.
-
-The portfolio value may rise or fall, but the base capital used for each position does not expand automatically.
+The backtest is simulated by `RotationEngine`; the daily reports independently replay its fills and reconcile portfolio values. With `allocation.mode=compound`, the current portfolio value is reinvested at each rebalance. `fixed_principal` redeploys the configured principal instead.
 
 ---
 
