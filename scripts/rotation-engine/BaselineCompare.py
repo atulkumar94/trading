@@ -11,6 +11,8 @@ import sys
 from pathlib import Path
 
 
+# Keep this allowlist to the seven required regression-gate reports. Snapshot,
+# portal, and manifest files are intentionally excluded from numeric comparison.
 REPORTS = (
     "equity",
     "tradebook",
@@ -23,10 +25,12 @@ REPORTS = (
 
 
 def report_paths(directory: Path, prefix: str) -> list[Path]:
+    """Build the canonical report paths for one output prefix."""
     return [directory / f"{prefix}_{name}.csv" for name in REPORTS]
 
 
 def capture(source: Path, destination: Path, prefix: str) -> int:
+    """Copy the complete gate report set, failing before copying if any is absent."""
     sources = report_paths(source, prefix)
     missing = [path for path in sources if not path.is_file()]
     if missing:
@@ -42,6 +46,7 @@ def capture(source: Path, destination: Path, prefix: str) -> int:
 
 
 def as_float(value: str) -> float | None:
+    """Return a numeric cell as a float; non-numeric CSV fields remain exact text."""
     try:
         return float(value)
     except ValueError:
@@ -49,6 +54,7 @@ def as_float(value: str) -> float | None:
 
 
 def compare_file(baseline: Path, candidate: Path, tolerance: float) -> tuple[bool, int, float, str]:
+    """Compare schema and rows, applying absolute tolerance only to numeric cells."""
     if not baseline.is_file() or not candidate.is_file():
         return False, 0, 0.0, "missing file"
 
@@ -79,6 +85,7 @@ def compare_file(baseline: Path, candidate: Path, tolerance: float) -> tuple[boo
             left_number = as_float(left_value)
             right_number = as_float(right_value)
             if left_number is not None and right_number is not None:
+                # Empty cells and labels compare as text; NaN matches only NaN.
                 if math.isnan(left_number) and math.isnan(right_number):
                     continue
                 delta = abs(left_number - right_number)
