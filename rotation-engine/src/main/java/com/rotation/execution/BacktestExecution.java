@@ -17,6 +17,10 @@ import com.rotation.portfolio.Ledger;
 import com.rotation.portfolio.Portfolio;
 import com.rotation.strategy.ExitPolicy;
 import com.rotation.strategy.Candidate;
+import com.rotation.strategy.OrderIntent;
+import com.rotation.strategy.Strategy;
+import com.rotation.strategy.PortfolioView;
+import com.rotation.market.MarketView;
 
 /** Executes protective exits using close signals and next-session open prices. */
 public final class BacktestExecution implements ExecutionModel {
@@ -25,6 +29,12 @@ public final class BacktestExecution implements ExecutionModel {
 
     public BacktestExecution(ExitPolicy exitPolicy) {
         this.exitPolicy = exitPolicy;
+    }
+
+    /** Ask the strategy for close-time intents and queue them for the next open. */
+    public List<OrderIntent> collectCloseIntents(Strategy strategy, MarketView market,
+                                                  Portfolio portfolio) {
+        return List.copyOf(strategy.onClose(market, new PortfolioView(portfolio)));
     }
 
     @Override

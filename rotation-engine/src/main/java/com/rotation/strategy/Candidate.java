@@ -1,7 +1,7 @@
 package com.rotation.strategy;
 
 /**
- * One scored, eligible symbol produced by a {@link RotationStrategy} at a signal
+ * One scored, eligible symbol produced by momentum ranking at a signal
  * date. The ranking is strategy-defined: {@code score} is whatever the strategy
  * ranks by (higher is better). For the momentum strategy it is the trailing
  * lookback return in percent, with {@code referencePrice}/{@code currentPrice}

@@ -7,9 +7,8 @@ import java.util.Locale;
  * next open by the engine. Either percentage {@code <= 0} disables that leg; when
  * both are disabled the policy is inactive and never fires. When both are set the
  * tighter (higher) level triggers first.
- *
  * <p>This is the exact stop logic that previously lived inside the engine, now a
- * reusable policy any strategy can return from {@link RotationStrategy#exitPolicy()}.
+ * reusable policy any strategy can return from {@link Strategy#exitPolicy()}.
  */
 public final class StopLossExitPolicy implements ExitPolicy {
 

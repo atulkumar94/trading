@@ -17,14 +17,14 @@ public final class RebalanceLogger {
 
     public void logRunHeader(int universeSize, int sessions, LocalDate firstDate, LocalDate lastDate,
                              int topN, int lookbackDays, String schedule, int minHistory,
-                             String allocationMode, int rebalances) {
+                             String allocationMode) {
         System.out.println(RULE);
         System.out.printf(Locale.US,
                 "Rotation run | universe %d symbols | %d sessions (%s -> %s)%n",
                 universeSize, sessions, fmtDate(firstDate), fmtDate(lastDate));
         System.out.printf(Locale.US,
-                "Params | top_n=%d | lookback=%d | schedule=%s | min_history=%d | allocation=%s | rebalances=%d%n",
-                topN, lookbackDays, schedule, minHistory, allocationMode, rebalances);
+                "Params | top_n=%d | lookback=%d | strategy=%s | min_history=%d | allocation=%s%n",
+                topN, lookbackDays, schedule, minHistory, allocationMode);
     }
 
     public void logRebalance(int rebalanceNumber, LocalDate signalDate, LocalDate executionDate,

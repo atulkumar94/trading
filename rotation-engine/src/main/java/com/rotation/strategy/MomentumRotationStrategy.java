@@ -9,9 +9,11 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 
 import com.rotation.config.RotationConfig;
 import com.rotation.market.MarketView;
@@ -23,9 +25,9 @@ import com.rotation.market.MarketView;
  * currently-held names are retained until they fall out of the top {@code exit.n}.
  *
  * <p>This class is the exact decision logic that previously lived inside the engine;
- * it is unchanged in behaviour and simply relocated behind {@link RotationStrategy}.
+ * it is unchanged in behaviour and now emits signal-only order intents.
  */
-public final class MomentumRotationStrategy implements RotationStrategy {
+public final class MomentumRotationStrategy implements Strategy {
 
     static final String MODE_MONTHLY = "monthly";
     static final String MODE_WEEKLY = "weekly";
@@ -39,6 +41,9 @@ public final class MomentumRotationStrategy implements RotationStrategy {
     private final double stopLossPct;
     private final double trailingStopPct;
     private final Map<String, String> sectorBySymbol;
+    private final List<Diagnostic> diagnosticRows = new ArrayList<>();
+    private StrategyContext context;
+    private int nextSignalIndex = -1;
 
     public MomentumRotationStrategy(RotationConfig config) {
         this.topN = config.topN();
@@ -73,30 +78,8 @@ public final class MomentumRotationStrategy implements RotationStrategy {
     }
 
     @Override
-    public String scheduleLabel() {
-        return rebalanceMode + "@every-" + rebalanceIntervalSessions(rebalanceMode) + "-sessions";
-    }
-
-    /**
-     * Signal indices (execution is at {@code signalIdx + 1}). The first signal is the
-     * earliest session, no earlier than the one before the start date, whose lookback
-     * window is complete and has at least one eligible symbol. Each later signal is
-     * {@link #rebalanceIntervalSessions} trading sessions after the previous one.
-     */
-    @Override
     public int warmupSessions() {
         return lookbackDays;
-    }
-
-    @Override
-    public List<Integer> rebalanceSignals(int sessionCount, int firstEligibleSignalIdx) {
-        int interval = rebalanceIntervalSessions(rebalanceMode);
-        int lastSignal = sessionCount - 2;
-        List<Integer> signalIndices = new ArrayList<>();
-        for (int signal = firstEligibleSignalIdx; signal <= lastSignal; signal += interval) {
-            signalIndices.add(signal);
-        }
-        return signalIndices;
     }
 
     @Override
@@ -105,7 +88,6 @@ public final class MomentumRotationStrategy implements RotationStrategy {
     }
 
     /** Rank all eligible symbols by trailing lookback return (desc), ties by symbol (asc). */
-    @Override
     public List<Candidate> rank(MarketView market, int minHistory) {
         List<Candidate> candidates = new ArrayList<>();
         List<String> symbols = market.symbols();
@@ -127,6 +109,131 @@ public final class MomentumRotationStrategy implements RotationStrategy {
         return candidates;
     }
 
+    @Override
+    public void init(StrategyContext context) {
+        this.context = context;
+        this.nextSignalIndex = -1;
+        diagnosticRows.clear();
+    }
+
+    @Override
+    public List<Diagnostic> diagnostics() {
+        return Collections.unmodifiableList(diagnosticRows);
+    }
+
+    @Override
+    public List<OrderIntent> onClose(MarketView market, PortfolioView portfolio) {
+        if (context == null) {
+            throw new IllegalStateException("Momentum strategy must be initialized before onClose");
+        }
+        int signalIndex = market.sessionIndex();
+        List<Candidate> ranked = rank(market, context.minHistory);
+        boolean rebalance = false;
+        if (signalIndex >= context.firstSignalIndex && signalIndex <= context.lastSignalIndex) {
+            if (nextSignalIndex < 0) {
+                if (!ranked.isEmpty()) {
+                    rebalance = true;
+                    nextSignalIndex = signalIndex + rebalanceIntervalSessions(rebalanceMode);
+                }
+            } else if (signalIndex >= nextSignalIndex) {
+                rebalance = true;
+                nextSignalIndex += rebalanceIntervalSessions(rebalanceMode);
+            }
+        }
+
+        List<OrderIntent> intents = List.of();
+        if (rebalance) {
+            intents = createIntents(market, portfolio, ranked);
+            Set<String> selected = selectedSymbols(intents);
+            Set<String> core = new HashSet<>(selectCore(ranked));
+            int rank = 1;
+            for (Candidate candidate : ranked) {
+                diagnosticRows.add(new Diagnostic(Diagnostic.Kind.REBALANCE, market.asOfDate(),
+                    market.date(lookbackDays - 1),
+                        signalIndex, rank++, candidate.symbol, candidate.referencePrice,
+                        candidate.currentPrice, candidate.score, candidate.historyDays,
+                        selected.contains(candidate.symbol), core.contains(candidate.symbol), true));
+            }
+            if (ranked.isEmpty()) {
+                diagnosticRows.add(new Diagnostic(Diagnostic.Kind.REBALANCE, market.asOfDate(),
+                    market.date(lookbackDays - 1),
+                        signalIndex, 0, "", Double.NaN, Double.NaN, Double.NaN, 0,
+                        false, false, true));
+            }
+        }
+
+        int lookbackStart = Math.max(lookbackDays - 1, context.lastSignalIndex - 28);
+        if (signalIndex >= lookbackStart) {
+            int rank = 1;
+            for (Candidate candidate : ranked) {
+                boolean selected = rank <= topN;
+                diagnosticRows.add(new Diagnostic(Diagnostic.Kind.LOOKBACK, market.asOfDate(),
+                    market.date(lookbackDays - 1),
+                        signalIndex, rank++, candidate.symbol, candidate.referencePrice,
+                        candidate.currentPrice, candidate.score, candidate.historyDays,
+                        selected, selected, false));
+            }
+        }
+        return intents;
+    }
+
+    private List<OrderIntent> createIntents(MarketView market, PortfolioView portfolio,
+                                             List<Candidate> ranked) {
+        List<String> selected = select(ranked, portfolio.symbols());
+        Set<String> selectedSet = new HashSet<>(selected);
+        Map<String, Integer> ranks = new HashMap<>();
+        for (int i = 0; i < ranked.size(); i++) {
+            ranks.put(ranked.get(i).symbol, i + 1);
+        }
+        Set<String> core = new HashSet<>(selectCore(ranked));
+        List<OrderIntent> intents = new ArrayList<>();
+        for (String symbol : selected) {
+            int rank = ranks.getOrDefault(symbol, Integer.MAX_VALUE);
+            boolean wasHeld = portfolio.symbols().contains(symbol);
+            String reason = wasHeld
+                    ? "Re-sized to target allocation (rank " + rank + " of " + ranked.size()
+                            + (core.contains(symbol) ? ", in top.n selection)" : ", retained in exit buffer)")
+                    : "Entered: rank " + rank + " of " + ranked.size() + " (top.n=" + topN
+                            + (rank > topN ? ", higher-ranked names skipped by sector cap)" : ")");
+            intents.add(new OrderIntent(symbol,
+                    wasHeld ? OrderIntent.Kind.TARGET_ALLOCATION : OrderIntent.Kind.ENTER,
+                    1.0 / exitN, Double.NaN, reason, rank, market.sessionIndex()));
+        }
+
+        TreeSet<String> previous = new TreeSet<>(portfolio.symbols());
+        for (String symbol : previous) {
+            if (!selectedSet.contains(symbol)) {
+                Integer rank = ranks.get(symbol);
+                intents.add(new OrderIntent(symbol, OrderIntent.Kind.EXIT, 0.0, Double.NaN,
+                        exitReason(rank, ranked.size()), rank == null ? Integer.MAX_VALUE : rank,
+                        market.sessionIndex()));
+            }
+        }
+        return intents;
+    }
+
+    private static Set<String> selectedSymbols(List<OrderIntent> intents) {
+        Set<String> selected = new HashSet<>();
+        for (OrderIntent intent : intents) {
+            if (intent.kind == OrderIntent.Kind.ENTER
+                    || intent.kind == OrderIntent.Kind.TARGET_ALLOCATION) {
+                selected.add(intent.symbol);
+            }
+        }
+        return selected;
+    }
+
+    private String exitReason(Integer rank, int rankedCount) {
+        if (rank == null) {
+            return "Ineligible at signal (missing close or insufficient history)";
+        }
+        if (rank > exitN) {
+            return "Rank " + rank + " of " + rankedCount + ", below exit rank " + exitN;
+        }
+        return "Rank " + rank + " of " + rankedCount + ", within exit rank " + exitN
+                + " but not reselected (sector cap or book capacity)";
+    }
+
     /**
      * Pick the top {@code topN} symbols from the ranked list, optionally capping how many
      * may come from a single sector. The cap keeps two highly-correlated same-theme names
@@ -135,7 +242,6 @@ public final class MomentumRotationStrategy implements RotationStrategy {
      * of sector so a slot is never left empty. Symbols with no sector mapping are never
      * capped. When the cap is disabled (or no map is loaded) this is a plain top-N cut.
      */
-    @Override
     public List<String> selectCore(List<Candidate> ranked) {
         if (maxPerSector <= 0 || sectorBySymbol.isEmpty()) {
             List<String> plain = new ArrayList<>();
@@ -181,7 +287,6 @@ public final class MomentumRotationStrategy implements RotationStrategy {
      * so two same-sector names never coexist. When {@code exitN == topN} this reduces to a
      * plain sector-capped top-N cut (legacy behaviour).
      */
-    @Override
     public List<String> select(List<Candidate> ranked, Set<String> currentHoldings) {
         List<String> selected = selectCore(ranked);
         if (exitN <= topN) {

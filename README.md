@@ -14,7 +14,7 @@ filter (end.date / symbols.file / market.sector) — full history kept for lookb
 rotation_daily_market_snapshot.csv   ← single source of truth
     ↓  SnapshotDailyBarLoader (reload)
     ├─→ MonthlyMarketSnapshotExporter → rotation_monthly_market_snapshot.csv
-    └─→ RotationEngine (trades from start.date; RotationStrategy picks the book) → CsvExporter → rebalances / equity / performance /
+    └─→ BacktestRunner (trades from start.date; Strategy emits close-time intents) → CsvExporter → rebalances / equity / performance /
                                         │               tradebook / holdings / lookback / yearly
                                         └─→ DailyReportJob → daily_portfolio / daily_positions / trade_ledger
                                                            → run_manifest.json (config, coverage, checks)
@@ -41,12 +41,13 @@ stocksData/
         │   ├── Main.java              ← Entry point / orchestration
         │   ├── config/                ← RotationConfig
         │   ├── data/                  ← Loaders (MinuteHistory, Snapshot)
-        │   ├── engine/                ← RotationEngine day loop and strategy coordination
+        │   ├── engine/                ← RotationEngine compatibility facade
+        │   ├── runner/                ← BacktestRunner day loop and strategy coordination
         │   ├── market/                 ← MarketData and backward-only MarketView
         │   ├── indicators/             ← Cached point-in-time indicators
         │   ├── execution/             ← ExecutionModel and BacktestExecution
         │   ├── portfolio/             ← Portfolio, Position, Ledger, Fill
-        │   ├── strategy/              ← Pluggable selection (RotationStrategy, MomentumRotationStrategy)
+        │   ├── strategy/              ← Strategy intents and momentum signal logic
         │   ├── job/                   ← DailyRefreshJob
         │   ├── model/                 ← Immutable data models (DailyBars, …)
         │   └── report/                ← Ledger report projections and CSV exporters

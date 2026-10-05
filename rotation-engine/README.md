@@ -406,9 +406,15 @@ This contains the latest 30 trading-day lookback rankings using the current run 
 
 `DailyReportJob` runs after the CSV exports in both modes:
 
-- `RotationEngine` coordinates the existing day loop and strategy decisions. It sends a pending
-  rebalance to `ExecutionModel`; `BacktestExecution` owns next-open prices, whole-share sizing,
-  position changes, cash effects, and protective-stop fills.
+- `RotationEngine` is a compatibility facade over `BacktestRunner`. The runner owns one daily loop:
+  execute prior-close intents at the next open, apply protective stops, mark to close, then call
+  `Strategy.onClose` for that session. Stops due at an open are applied before same-open rebalance
+  intents, matching the established execution order.
+- `Strategy` receives only `MarketView` and a read-only `PortfolioView`. Momentum emits
+  `OrderIntent` values (`ENTER`, `EXIT`, `TARGET_ALLOCATION`) and ranking `Diagnostic` snapshots;
+  it does not mutate positions, fills, cash, or reports.
+- `BacktestExecution` owns next-open prices, whole-share sizing, position changes, cash effects,
+  and protective-stop fills. The runner adapts intents and diagnostics into its execution/report events.
 - `Portfolio` owns ordered `Position` state and account balances. `Ledger` records `Fill` events,
   end-of-day `DailyMark` snapshots, and immutable rebalance/final-mark events.
 - `BacktestReportBuilder` projects the ledger's rebalance, equity, holdings and year-end events into
@@ -429,30 +435,19 @@ See the root README's *Reporting portal* section for metric definitions and limi
 
 ## Pluggable strategy
 
-The **signals** — which symbols to hold, when to rebalance, and (optionally) when to
-stop out — are isolated behind a small interface so you can swap the logic without
-touching the engine. The engine owns everything mechanical: next-open execution,
-capital accounting, running the exit policy, and all reporting. The strategy owns the
-rebalance schedule, ranks the universe, picks the book each period, and decides whether
-to supply an exit policy at all.
+The strategy emits close-time intents and diagnostics through a signal-only interface. The
+runner owns the session loop, while `ExecutionModel` owns fills and account mutations. The
+strategy sees only an as-of `MarketView` and immutable `PortfolioView`.
 
 The interface lives in the `strategy` package:
 
 ```java
-public interface RotationStrategy {
+public interface Strategy {
     String name();
-
-  // The engine checks rank through one as-of view at a time; cadence gets metadata only.
   int warmupSessions();
-  List<Integer> rebalanceSignals(int sessionCount, int firstEligibleSignalIdx);
-    default String scheduleLabel() { return name() + "-schedule"; }
-
-  // Rank from the signal-close view, then pick the book.
-  List<Candidate> rank(MarketView market, int minHistory);
-    List<String> selectCore(List<Candidate> ranked);              // always-entered core (top-N)
-    List<String> select(List<Candidate> ranked, Set<String> held); // full book incl. exit buffer
-
-    // Optional intra-period exit rule. Strategies that don't stop out keep the default.
+    void init(StrategyContext context);
+    List<OrderIntent> onClose(MarketView market, PortfolioView portfolio);
+    default List<Diagnostic> diagnostics() { return List.of(); }
     default ExitPolicy exitPolicy() { return ExitPolicy.NONE; }
 }
 ```
@@ -473,11 +468,9 @@ strategy=momentum
 
 ### Plugging in a new strategy
 
-1. Implement `RotationStrategy` in `com.rotation.strategy` with your own schedule,
-   ranking, and selection rules. A strategy reads its own tunables (e.g. `top.n`,
-   `exit.n`, `lookback.days`, `rebalance.mode`, stop settings, sector settings) from the
-   `RotationConfig` it is constructed with. Supply an `exitPolicy()` only if the strategy
-   uses intra-period exits.
+1. Implement `Strategy` in `com.rotation.strategy`. Return intents and diagnostic snapshots
+  from `onClose`; do not place fills or modify portfolio/accounting state. Supply an
+  `exitPolicy()` only if the strategy uses intra-period exits.
 2. Register it in `RotationStrategies.create(...)` under a new `strategy` name.
 3. Set `strategy=<yourname>` in [config/rotation.properties](config/rotation.properties) and run.
 
@@ -511,13 +504,14 @@ This will:
 
 - `Main.java` — entry point
 - `RotationConfig.java` — loads all settings
-- `RotationEngine.java` — daily driver and strategy coordination
+- `RotationEngine.java` — compatibility facade
+- `runner/BacktestRunner.java` — single daily driver and diagnostics/report orchestration
 - `market/MarketData.java` + `MarketView.java` — backward-only point-in-time market access
 - `indicators/IndicatorCache.java` — cached SMA, ATR, ADX, returns, and rolling low
 - `execution/ExecutionModel.java` + `BacktestExecution.java` — next-open fill and protective-stop mechanics
 - `portfolio/Portfolio.java` + `Position.java` + `Ledger.java` + `Fill.java` — account state and ordered events
 - `report/BacktestReportBuilder.java` — legacy rebalance, equity, holdings and year-end row projections
-- `strategy/RotationStrategy.java` + `MomentumRotationStrategy.java` + `RotationStrategies.java` — the pluggable signal layer (schedule + rank + pick the book)
+- `strategy/Strategy.java` + `MomentumRotationStrategy.java` + `RotationStrategies.java` — close-time intents and diagnostics
 - `strategy/ExitPolicy.java` + `StopLossExitPolicy.java` — optional, strategy-supplied intra-period exit rule
 - `MinuteHistoryDailyBarLoader.java` — loads external daily/history CSVs
 - `CsvExporter.java` — writes CSV reports
