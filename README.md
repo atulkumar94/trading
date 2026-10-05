@@ -42,6 +42,8 @@ stocksData/
         │   ├── config/                ← RotationConfig
         │   ├── data/                  ← Loaders (MinuteHistory, Snapshot)
         │   ├── engine/                ← RotationEngine day loop and strategy coordination
+        │   ├── market/                 ← MarketData and backward-only MarketView
+        │   ├── indicators/             ← Cached point-in-time indicators
         │   ├── execution/             ← ExecutionModel and BacktestExecution
         │   ├── portfolio/             ← Portfolio, Position, Ledger, Fill
         │   ├── strategy/              ← Pluggable selection (RotationStrategy, MomentumRotationStrategy)

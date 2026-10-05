@@ -3,7 +3,7 @@ package com.rotation.strategy;
 import java.util.List;
 import java.util.Set;
 
-import com.rotation.model.DailyBars;
+import com.rotation.market.MarketView;
 
 /**
  * The pluggable decision layer of the backtest: it decides <em>when</em> to
@@ -25,13 +25,15 @@ public interface RotationStrategy {
     /** Human-readable id, matched case-insensitively against the {@code strategy} config key. */
     String name();
 
+    /** Minimum warm-up sessions required before the strategy can rank a signal. */
+    int warmupSessions();
+
     /**
-     * Trading-session indices at which the strategy makes a rebalance decision
-     * (execution is at {@code signalIdx + 1}). The strategy owns its own cadence.
-     * {@code tradeStartIdx} is the first session eligible to trade (from start.date)
-     * and {@code minHistory} the minimum tracked bars a symbol needs to be eligible.
+     * Trading-session indices at which the strategy makes decisions. The engine
+     * supplies the first signal with eligible candidates after evaluating each
+     * session through its own point-in-time MarketView.
      */
-    List<Integer> rebalanceSignals(DailyBars bars, int tradeStartIdx, int minHistory);
+    List<Integer> rebalanceSignals(int sessionCount, int firstEligibleSignalIdx);
 
     /** Short label describing the rebalance schedule, used in verbose run logs. */
     default String scheduleLabel() {
@@ -40,13 +42,10 @@ public interface RotationStrategy {
 
     /**
      * Score and rank the eligible universe at a signal date, best first. The engine
-     * supplies the scoring window and eligibility threshold it derived from config:
-     * {@code signalIdx} is the session the decision is made on (its close), while
-     * {@code referenceIdx} is the window start (e.g. the lookback-day index) and
-     * {@code minHistory} the minimum tracked bars a symbol needs to be eligible.
-     * A symbol that is ineligible (missing data or too little history) is omitted.
+    * supplies a view ending at the signal session's close. The view cannot expose
+    * later sessions; the strategy owns its scoring window and eligibility rules.
      */
-    List<Candidate> rank(DailyBars bars, int signalIdx, int referenceIdx, int minHistory);
+    List<Candidate> rank(MarketView market, int minHistory);
 
     /**
      * The core names that are always entered this period (the sector-capped top-N).

@@ -21,6 +21,8 @@ import com.rotation.model.LookbackRow;
 import com.rotation.model.PerformanceRow;
 import com.rotation.model.TradebookRow;
 import com.rotation.model.YearEndEquity;
+import com.rotation.market.MarketData;
+import com.rotation.market.MarketView;
 import com.rotation.portfolio.FinalPortfolioMark;
 import com.rotation.portfolio.Ledger;
 import com.rotation.portfolio.Portfolio;
@@ -78,6 +80,7 @@ public final class RotationEngine {
         double monthlyContribution = config.monthlyContribution();
         boolean verbose = config.verbose();
         List<LocalDate> dates = bars.dates();
+        MarketData market = new MarketData(bars);
         int dateCount = dates.size();
         if (dateCount <= lookbackDays) {
             throw new IllegalArgumentException("Not enough history to run the requested lookback window.");
@@ -91,7 +94,13 @@ public final class RotationEngine {
         // with a complete lookback. Each decision is ranked on the prior session's close
         // and executed at the next open, so switches happen before the day trades.
         String scheduleLabel = strategy.scheduleLabel();
-        List<Integer> rebalancePoints = strategy.rebalanceSignals(bars, tradeStartIdx, minHistory);
+        int firstSignal = Math.max(tradeStartIdx - 1, strategy.warmupSessions() - 1);
+        int lastSignal = dateCount - 2;
+        while (firstSignal <= lastSignal
+                && strategy.rank(market.asOf(firstSignal), minHistory).isEmpty()) {
+            firstSignal++;
+        }
+        List<Integer> rebalancePoints = strategy.rebalanceSignals(dateCount, firstSignal);
         if (rebalancePoints.isEmpty()) {
             throw new IllegalArgumentException("Not enough observations to run the requested rebalance schedule.");
         }
@@ -188,7 +197,7 @@ public final class RotationEngine {
             // --- 2. Rank the eligible universe and pick the book. Always enter the
             //        top-N; when exit.n > top.n, retain currently-held names until they
             //        fall out of the top exit.n (the book may grow up to exit.n). ---
-            List<Candidate> ranked = strategy.rank(bars, signalIdx, referenceIdx, minHistory);
+            List<Candidate> ranked = strategy.rank(market.asOf(signalIdx), minHistory);
             List<String> selected = strategy.select(ranked, holdings.keySet());
             TreeSet<String> selectedSet = new TreeSet<>(selected);
             Map<String, Integer> rankBySymbol = new HashMap<>();
@@ -371,7 +380,7 @@ public final class RotationEngine {
                 initialCapital);
         yearEndMarks.forEach(ledger::recordYearEndMark);
 
-        List<LookbackRow> lookbackRows = buildLookbackRows(bars, lookbackDays, minHistory, topN);
+        List<LookbackRow> lookbackRows = buildLookbackRows(market, lookbackDays, minHistory, topN);
         BacktestReports reports = new BacktestReportBuilder().build(ledger);
         return new BacktestResult(reports.rebalances(), reports.equityRows(), performanceRows,
                 tradebookRows, lookbackRows, reports.holdingsRows(), reports.yearEndMarks(),
@@ -457,20 +466,20 @@ public final class RotationEngine {
         throw new IllegalArgumentException("No data available on/after start date: " + startDate);
     }
 
-    private List<LookbackRow> buildLookbackRows(DailyBars bars, int lookbackDays, int minHistory, int topN) {
+    private List<LookbackRow> buildLookbackRows(MarketData market, int lookbackDays, int minHistory, int topN) {
         List<LookbackRow> rows = new ArrayList<>();
-        List<LocalDate> dates = bars.dates();
-        if (dates.isEmpty()) {
+        if (market.sessionCount() == 0) {
             return rows;
         }
 
-        int startSignalIdx = Math.max(lookbackDays - 1, dates.size() - 30);
-        for (int signalIdx = startSignalIdx; signalIdx < dates.size(); signalIdx++) {
-            int referenceIdx = signalIdx - (lookbackDays - 1);
-            List<Candidate> ranked = strategy.rank(bars, signalIdx, referenceIdx, minHistory);
-            LocalDate signalDate = dates.get(signalIdx);
-            LocalDate lookbackStart = referenceIdx >= 0 ? dates.get(referenceIdx) : null;
-            LocalDate executionDate = signalIdx + 1 < dates.size() ? dates.get(signalIdx + 1) : null;
+        int startSignalIdx = Math.max(lookbackDays - 1, market.sessionCount() - 30);
+        for (int signalIdx = startSignalIdx; signalIdx < market.sessionCount(); signalIdx++) {
+            MarketView signalMarket = market.asOf(signalIdx);
+            List<Candidate> ranked = strategy.rank(signalMarket, minHistory);
+            LocalDate signalDate = signalMarket.asOfDate();
+            LocalDate lookbackStart = signalMarket.date(lookbackDays - 1);
+            LocalDate executionDate = signalIdx + 1 < market.sessionCount()
+                    ? market.sessionDate(signalIdx + 1) : null;
 
             for (int i = 0; i < ranked.size(); i++) {
                 Candidate candidate = ranked.get(i);

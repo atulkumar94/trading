@@ -14,7 +14,7 @@ import java.util.Map;
 import java.util.Set;
 
 import com.rotation.config.RotationConfig;
-import com.rotation.model.DailyBars;
+import com.rotation.market.MarketView;
 
 /**
  * The default strategy: fixed top-N momentum rotation with an optional sector cap
@@ -84,16 +84,16 @@ public final class MomentumRotationStrategy implements RotationStrategy {
      * {@link #rebalanceIntervalSessions} trading sessions after the previous one.
      */
     @Override
-    public List<Integer> rebalanceSignals(DailyBars bars, int tradeStartIdx, int minHistory) {
+    public int warmupSessions() {
+        return lookbackDays;
+    }
+
+    @Override
+    public List<Integer> rebalanceSignals(int sessionCount, int firstEligibleSignalIdx) {
         int interval = rebalanceIntervalSessions(rebalanceMode);
-        int lastSignal = bars.dateCount() - 2;
-        int first = Math.max(tradeStartIdx - 1, lookbackDays - 1);
-        while (first <= lastSignal
-                && rank(bars, first, first - (lookbackDays - 1), minHistory).isEmpty()) {
-            first++;
-        }
+        int lastSignal = sessionCount - 2;
         List<Integer> signalIndices = new ArrayList<>();
-        for (int signal = first; signal <= lastSignal; signal += interval) {
+        for (int signal = firstEligibleSignalIdx; signal <= lastSignal; signal += interval) {
             signalIndices.add(signal);
         }
         return signalIndices;
@@ -106,23 +106,20 @@ public final class MomentumRotationStrategy implements RotationStrategy {
 
     /** Rank all eligible symbols by trailing lookback return (desc), ties by symbol (asc). */
     @Override
-    public List<Candidate> rank(DailyBars bars, int signalIdx, int referenceIdx, int minHistory) {
+    public List<Candidate> rank(MarketView market, int minHistory) {
         List<Candidate> candidates = new ArrayList<>();
-        if (referenceIdx < 0) {
-            return candidates; // insufficient history for everyone (guaranteed cash period)
-        }
-        List<String> symbols = bars.symbols();
-        for (int s = 0; s < symbols.size(); s++) {
-            double current = bars.closeAt(signalIdx, s);
-            double lookback = bars.closeAt(referenceIdx, s);
-            int history = bars.eligibilityAt(signalIdx, s);
+        List<String> symbols = market.symbols();
+        for (String symbol : symbols) {
+            double current = market.close(symbol, 0);
+            double lookback = market.close(symbol, lookbackDays - 1);
+            int history = market.eligibility(symbol);
             boolean eligible = !Double.isNaN(current) && !Double.isNaN(lookback)
                     && lookback > 0 && history >= minHistory;
             if (!eligible) {
                 continue;
             }
             double returnPct = ((current / lookback) - 1.0) * 100.0;
-            candidates.add(new Candidate(symbols.get(s), returnPct, lookback, current, history));
+            candidates.add(new Candidate(symbol, returnPct, lookback, current, history));
         }
         candidates.sort(Comparator
                 .comparingDouble((Candidate c) -> c.score).reversed()

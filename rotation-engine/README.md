@@ -75,6 +75,23 @@ Each symbol file is normalized into a dataset with fields such as:
 
 This is done in the classes under the data package and then converted into a single daily matrix using the bar model.
 
+### Point-in-time market access and indicators
+
+`MarketData` wraps the aligned bars and creates a `MarketView` at one session.
+On a view, `back=0` is that session and positive offsets read older sessions;
+negative offsets throw, so strategy ranking code has no price accessor for a
+future session. Momentum ranking and first-eligible-signal discovery both use
+views anchored at the signal close.
+
+The `indicators` package caches values by symbol, indicator, period, and as-of
+session. It supplies close SMA, fractional close-to-close returns, rolling low,
+Wilder ATR, and Wilder ADX. SMA and rolling-low windows include the as-of
+session; returns compare the as-of close with the close `period` sessions back.
+ATR seeds with the first `period` true ranges in the symbol's contiguous valid
+history and then applies Wilder smoothing. ADX uses Wilder-smoothed directional
+movement and true range, seeds from `period` DX values, and returns missing until
+enough contiguous history exists. Missing required bars yield `NaN`.
+
 ### 3) Start date and lookback warm-up
 
 The project supports a configurable `start.date`. It is the date the backtest
@@ -425,12 +442,13 @@ The interface lives in the `strategy` package:
 public interface RotationStrategy {
     String name();
 
-    // Rebalance schedule: signal indices (execution is at signalIdx + 1).
-    List<Integer> rebalanceSignals(DailyBars bars, int tradeStartIdx, int minHistory);
+  // The engine checks rank through one as-of view at a time; cadence gets metadata only.
+  int warmupSessions();
+  List<Integer> rebalanceSignals(int sessionCount, int firstEligibleSignalIdx);
     default String scheduleLabel() { return name() + "-schedule"; }
 
-    // Selection: rank the universe, then pick the book.
-    List<Candidate> rank(DailyBars bars, int signalIdx, int referenceIdx, int minHistory);
+  // Rank from the signal-close view, then pick the book.
+  List<Candidate> rank(MarketView market, int minHistory);
     List<String> selectCore(List<Candidate> ranked);              // always-entered core (top-N)
     List<String> select(List<Candidate> ranked, Set<String> held); // full book incl. exit buffer
 
@@ -494,6 +512,8 @@ This will:
 - `Main.java` — entry point
 - `RotationConfig.java` — loads all settings
 - `RotationEngine.java` — daily driver and strategy coordination
+- `market/MarketData.java` + `MarketView.java` — backward-only point-in-time market access
+- `indicators/IndicatorCache.java` — cached SMA, ATR, ADX, returns, and rolling low
 - `execution/ExecutionModel.java` + `BacktestExecution.java` — next-open fill and protective-stop mechanics
 - `portfolio/Portfolio.java` + `Position.java` + `Ledger.java` + `Fill.java` — account state and ordered events
 - `report/BacktestReportBuilder.java` — legacy rebalance, equity, holdings and year-end row projections

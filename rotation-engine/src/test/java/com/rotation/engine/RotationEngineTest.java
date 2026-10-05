@@ -4,9 +4,17 @@ import com.rotation.config.RotationConfig;
 import com.rotation.model.BacktestResult;
 import com.rotation.model.DailyBars;
 import com.rotation.model.DailyCandle;
+import com.rotation.model.DailyMark;
+import com.rotation.model.EquityRow;
+import com.rotation.model.PerformanceRow;
+import com.rotation.model.RebalanceRecord;
 import com.rotation.model.SymbolDailyCandles;
 import com.rotation.model.TradebookRow;
 import com.rotation.model.YearEndEquity;
+import com.rotation.market.MarketData;
+import com.rotation.portfolio.Fill;
+import com.rotation.strategy.Candidate;
+import com.rotation.strategy.MomentumRotationStrategy;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -76,6 +84,32 @@ class RotationEngineTest {
         assertSessionGap(bars, dates, "monthly", 20);
     }
 
+    @Test
+    void pointInTimeSignalsFillsAndEquityMatchWhenHistoryIsTruncatedAtD() throws IOException {
+        DailyBars fullBars = bars(LocalDate.of(2023, 11, 1), LocalDate.of(2024, 6, 28));
+        LocalDate cutoff = LocalDate.of(2024, 2, 29);
+        int cutoffIndex = fullBars.dates().indexOf(cutoff);
+        DailyBars truncatedBars = fullBars.filterTo(cutoff);
+        RotationConfig config = config("start.date=2024-01-17\n");
+        MomentumRotationStrategy strategy = new MomentumRotationStrategy(config);
+        MarketData fullMarket = new MarketData(fullBars);
+        MarketData truncatedMarket = new MarketData(truncatedBars);
+
+        for (int session = LOOKBACK - 1; session <= cutoffIndex; session++) {
+            assertCandidatesEqual(strategy.rank(fullMarket.asOf(session), config.effectiveMinHistoryDays()),
+                    strategy.rank(truncatedMarket.asOf(session), config.effectiveMinHistoryDays()));
+        }
+
+        BacktestResult full = new RotationEngine(config).run(fullBars);
+        BacktestResult truncated = new RotationEngine(config).run(truncatedBars);
+        assertRebalancesEqual(throughRebalances(full.rebalances(), cutoff), truncated.rebalances());
+        assertEquityEqual(throughEquityRows(full.equityCurve(), cutoff), truncated.equityCurve());
+        assertFillsEqual(throughFills(full.fills(), cutoff), truncated.fills());
+        assertDailyMarksEqual(throughDailyMarks(full.dailyMarks(), cutoff), truncated.dailyMarks());
+        assertPerformanceEqual(throughExecutionDate(full.performanceRows(), cutoff),
+                truncated.performanceRows());
+    }
+
     private static void assertSessionGap(DailyBars bars, List<LocalDate> dates, String mode, int gap)
             throws IOException {
         BacktestResult result = new RotationEngine(config("rebalance.mode=" + mode + "\n")).run(bars);
@@ -91,6 +125,106 @@ class RotationEngineTest {
 
     private static LocalDate sessionAfter(DailyBars bars, LocalDate date, int sessions) {
         return bars.dates().get(bars.dates().indexOf(date) + sessions);
+    }
+
+    private static List<RebalanceRecord> throughRebalances(List<RebalanceRecord> rows, LocalDate cutoff) {
+        return rows.stream().filter(row -> !row.date.isAfter(cutoff)).toList();
+    }
+
+    private static List<EquityRow> throughEquityRows(List<EquityRow> rows, LocalDate cutoff) {
+        return rows.stream().filter(row -> !row.date.isAfter(cutoff)).toList();
+    }
+
+    private static List<Fill> throughFills(List<Fill> rows, LocalDate cutoff) {
+        return rows.stream().filter(row -> !row.date.isAfter(cutoff)).toList();
+    }
+
+    private static List<DailyMark> throughDailyMarks(List<DailyMark> rows, LocalDate cutoff) {
+        return rows.stream().filter(row -> !row.date.isAfter(cutoff)).toList();
+    }
+
+    private static List<PerformanceRow> throughExecutionDate(List<PerformanceRow> rows, LocalDate cutoff) {
+        return rows.stream().filter(row -> !row.executionDate.isAfter(cutoff)).toList();
+    }
+
+    private static void assertCandidatesEqual(List<Candidate> expected, List<Candidate> actual) {
+        assertEquals(expected.size(), actual.size());
+        for (int i = 0; i < expected.size(); i++) {
+            Candidate left = expected.get(i);
+            Candidate right = actual.get(i);
+            assertEquals(left.symbol, right.symbol);
+            assertEquals(left.score, right.score, 1e-9);
+            assertEquals(left.referencePrice, right.referencePrice, 1e-9);
+            assertEquals(left.currentPrice, right.currentPrice, 1e-9);
+            assertEquals(left.historyDays, right.historyDays);
+        }
+    }
+
+    private static void assertRebalancesEqual(List<RebalanceRecord> expected, List<RebalanceRecord> actual) {
+        assertEquals(expected.size(), actual.size());
+        for (int i = 0; i < expected.size(); i++) {
+            RebalanceRecord left = expected.get(i);
+            RebalanceRecord right = actual.get(i);
+            assertEquals(left.date, right.date);
+            assertEquals(left.signalDate, right.signalDate);
+            assertEquals(left.entered, right.entered);
+            assertEquals(left.exited, right.exited);
+            assertEquals(left.held, right.held);
+            assertEquals(left.accountEquity, right.accountEquity, 1e-9);
+            assertEquals(left.portfolioValueAfter, right.portfolioValueAfter, 1e-9);
+        }
+    }
+
+    private static void assertEquityEqual(List<EquityRow> expected, List<EquityRow> actual) {
+        assertEquals(expected.size(), actual.size());
+        for (int i = 0; i < expected.size(); i++) {
+            EquityRow left = expected.get(i);
+            EquityRow right = actual.get(i);
+            assertEquals(left.date, right.date);
+            assertEquals(left.signalDate, right.signalDate);
+            assertEquals(left.selectedSymbols, right.selectedSymbols);
+            assertEquals(left.accountEquity, right.accountEquity, 1e-9);
+            assertEquals(left.portfolioValue, right.portfolioValue, 1e-9);
+        }
+    }
+
+    private static void assertFillsEqual(List<Fill> expected, List<Fill> actual) {
+        assertEquals(expected.size(), actual.size());
+        for (int i = 0; i < expected.size(); i++) {
+            Fill left = expected.get(i);
+            Fill right = actual.get(i);
+            assertEquals(left.date, right.date);
+            assertEquals(left.signalDate, right.signalDate);
+            assertEquals(left.action, right.action);
+            assertEquals(left.symbol, right.symbol);
+            assertEquals(left.quantity, right.quantity, 1e-9);
+            assertEquals(left.price, right.price, 1e-9);
+        }
+    }
+
+    private static void assertDailyMarksEqual(List<DailyMark> expected, List<DailyMark> actual) {
+        assertEquals(expected.size(), actual.size());
+        for (int i = 0; i < expected.size(); i++) {
+            DailyMark left = expected.get(i);
+            DailyMark right = actual.get(i);
+            assertEquals(left.date, right.date);
+            assertEquals(left.holdings, right.holdings);
+            assertEquals(left.accountEquity, right.accountEquity, 1e-9);
+        }
+    }
+
+    private static void assertPerformanceEqual(List<PerformanceRow> expected, List<PerformanceRow> actual) {
+        assertEquals(expected.size(), actual.size());
+        for (int i = 0; i < expected.size(); i++) {
+            PerformanceRow left = expected.get(i);
+            PerformanceRow right = actual.get(i);
+            assertEquals(left.signalDate, right.signalDate);
+            assertEquals(left.executionDate, right.executionDate);
+            assertEquals(left.rank, right.rank);
+            assertEquals(left.symbol, right.symbol);
+            assertEquals(left.lookbackReturnPct, right.lookbackReturnPct, 1e-9);
+            assertEquals(left.selected, right.selected);
+        }
     }
 
     private static RotationConfig config(String extra) throws IOException {
