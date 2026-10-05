@@ -5,299 +5,167 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
 
-/**
- * Strategy configuration, loaded from a {@code .properties} file. Every tunable
- * parameter lives here so behaviour can be changed without touching code.
- */
+/** Backward-compatible facade over common pipeline and momentum strategy configuration. */
 public final class RotationConfig {
 
-    private final Path projectRoot;
-    private final int lookbackDays;
-    private final int topN;
-    private final int exitN;
-    private final double capitalPerStock;
-    private final double monthlyContribution;
-    private final double stopLossPct;
-    private final double trailingStopPct;
-    private final int minHistoryDays;
-    private final String allocationMode;
-    private final String rebalanceMode;
+    private static final Set<String> COMMON_KEYS = Set.of(
+            "strategy", "data.path", "start.date", "end.date", "symbols.file", "sector.file",
+            "market.sector", "output.dir", "output.prefix", "portal.enabled", "verbose");
+    private static final Set<String> MOMENTUM_KEYS = Set.of(
+            "momentum.lookback.days", "momentum.top.n", "momentum.exit.n",
+            "momentum.capital.per.stock", "momentum.monthly.contribution",
+            "momentum.stop.loss.pct", "momentum.trailing.stop.pct", "momentum.min.history.days",
+            "momentum.allocation.mode", "momentum.rebalance.mode", "momentum.max.per.sector");
+    private static final Map<String, String> LEGACY_KEYS = Map.ofEntries(
+            Map.entry("lookback.days", "momentum.lookback.days"),
+            Map.entry("top.n", "momentum.top.n"),
+            Map.entry("exit.n", "momentum.exit.n"),
+            Map.entry("capital.per.stock", "momentum.capital.per.stock"),
+            Map.entry("monthly.contribution", "momentum.monthly.contribution"),
+            Map.entry("stop.loss.pct", "momentum.stop.loss.pct"),
+            Map.entry("trailing.stop.pct", "momentum.trailing.stop.pct"),
+            Map.entry("min.history.days", "momentum.min.history.days"),
+            Map.entry("allocation.mode", "momentum.allocation.mode"),
+            Map.entry("rebalance.mode", "momentum.rebalance.mode"),
+            Map.entry("max.per.sector", "momentum.max.per.sector"));
+
+    private final CommonConfig common;
+    private final MomentumConfig momentum;
     private final String strategy;
-    private final String dataPath;
-    private final LocalDate startDate;
-    private final LocalDate endDate;
-    private final String symbolsFile;
-    private final String sectorFile;
-    private final int maxPerSector;
-    private final String marketSector;
-    private final String outputDir;
-    private final String outputPrefix;
-    private final boolean verbose;
-    private final boolean portalEnabled;
     private final Path sourceFile;
 
-    private RotationConfig(Path projectRoot, Path sourceFile, Properties props) {
-        this.projectRoot = projectRoot;
+    private RotationConfig(Path projectRoot, Path sourceFile, Properties source) {
         this.sourceFile = sourceFile;
-        this.lookbackDays = intProp(props, "lookback.days", 30);
-        this.topN = intProp(props, "top.n", 1);
-        this.exitN = intProp(props, "exit.n", 0);
-        this.capitalPerStock = doubleProp(props, "capital.per.stock", 100000.0);
-        this.monthlyContribution = doubleProp(props, "monthly.contribution", 0.0);
-        this.stopLossPct = doubleProp(props, "stop.loss.pct", 0.0);
-        this.trailingStopPct = doubleProp(props, "trailing.stop.pct", 0.0);
-        this.minHistoryDays = intProp(props, "min.history.days", 2);
-        this.allocationMode = stringProp(props, "allocation.mode", "compound");
-        this.rebalanceMode = stringProp(props, "rebalance.mode", "monthly_twice");
-        this.strategy = stringProp(props, "strategy", "momentum");
-        this.dataPath = stringProp(props, "data.path", "");
-        this.startDate = localDateProp(props, "start.date", null);
-        this.endDate = localDateProp(props, "end.date", null);
-        this.symbolsFile = stringProp(props, "symbols.file", "");
-        this.sectorFile = stringProp(props, "sector.file", "");
-        this.maxPerSector = intProp(props, "max.per.sector", 0);
-        this.marketSector = stringProp(props, "market.sector", "");
-        this.outputDir = stringProp(props, "output.dir", "output/rotation");
-        this.outputPrefix = stringProp(props, "output.prefix", "rotation");
-        this.verbose = booleanProp(props, "verbose", true);
-        this.portalEnabled = booleanProp(props, "portal.enabled", true);
-        validate();
+        Properties normalized = normalizeAndValidate(source);
+        common = new CommonConfig(projectRoot, normalized);
+        momentum = new MomentumConfig(normalized);
+        strategy = value(normalized, "strategy", "momentum");
+        validateCommon();
     }
 
     public static RotationConfig load(Path configFile, Path projectRoot) {
-        Properties props = new Properties();
-        try (InputStream in = Files.newInputStream(configFile)) {
-            props.load(in);
-        } catch (IOException e) {
-            throw new IllegalArgumentException("Unable to read config file: " + configFile, e);
+        Properties properties = new Properties();
+        try (InputStream input = Files.newInputStream(configFile)) {
+            properties.load(input);
+        } catch (IOException exception) {
+            throw new IllegalArgumentException("Unable to read config file: " + configFile, exception);
         }
-        return new RotationConfig(projectRoot, configFile, props);
+        return new RotationConfig(projectRoot, configFile, properties);
     }
 
-    private void validate() {
-        if (topN <= 0) {
-            throw new IllegalArgumentException("top.n must be greater than zero.");
+    private void validateCommon() {
+        if (!strategy.equalsIgnoreCase("momentum")) {
+            throw new IllegalArgumentException("Unknown strategy: '" + strategy + "'. Known strategies: momentum.");
         }
-        if (exitN != 0 && exitN < topN) {
-            throw new IllegalArgumentException("exit.n must be zero (disabled) or greater than or equal to top.n.");
-        }
-        if (lookbackDays <= 0) {
-            throw new IllegalArgumentException("lookback.days must be greater than zero.");
-        }
-        if (capitalPerStock <= 0) {
-            throw new IllegalArgumentException("capital.per.stock must be greater than zero.");
-        }
-        if (monthlyContribution < 0) {
-            throw new IllegalArgumentException("monthly.contribution must be zero or positive.");
-        }
-        if (stopLossPct < 0 || stopLossPct >= 100) {
-            throw new IllegalArgumentException("stop.loss.pct must be in [0, 100).");
-        }
-        if (trailingStopPct < 0 || trailingStopPct >= 100) {
-            throw new IllegalArgumentException("trailing.stop.pct must be in [0, 100).");
-        }
-        if (maxPerSector < 0) {
-            throw new IllegalArgumentException("max.per.sector must be zero or positive.");
-        }
-        if (!marketSector.isBlank() && sectorFile.isBlank()) {
+        if (common.marketSector() != null && common.sectorFile().isBlank()) {
             throw new IllegalArgumentException("market.sector requires sector.file to be set.");
         }
-        if (startDate != null && endDate != null && endDate.isBefore(startDate)) {
+        if (common.startDate() != null && common.endDate() != null
+                && common.endDate().isBefore(common.startDate())) {
             throw new IllegalArgumentException("end.date must be on or after start.date.");
         }
-        if (!allocationMode.equals("compound") && !allocationMode.equals("fixed_principal")) {
-            throw new IllegalArgumentException("allocation.mode must be 'compound' or 'fixed_principal'.");
+    }
+
+    private static Properties normalizeAndValidate(Properties source) {
+        Properties normalized = new Properties();
+        normalized.putAll(source);
+        List<String> legacyKeys = new ArrayList<>();
+        for (String key : source.stringPropertyNames()) {
+            String legacyTarget = LEGACY_KEYS.get(key);
+            if (legacyTarget != null) {
+                legacyKeys.add(key);
+                if (!source.containsKey(legacyTarget)) {
+                    normalized.setProperty(legacyTarget, source.getProperty(key));
+                }
+                continue;
+            }
+            if (!COMMON_KEYS.contains(key) && !MOMENTUM_KEYS.contains(key)) {
+                throw unknownKey(key);
+            }
         }
-        if (!rebalanceMode.equals("monthly") && !rebalanceMode.equals("weekly")
-                && !rebalanceMode.equals("monthly_twice")) {
-            throw new IllegalArgumentException(
-                    "rebalance.mode must be 'monthly', 'weekly', or 'monthly_twice'.");
+        for (String legacy : legacyKeys) {
+            System.err.printf("Deprecated config key '%s'; use '%s'.%n", legacy, LEGACY_KEYS.get(legacy));
         }
+        return normalized;
     }
 
-    /** Resolve the input data directory from the configured data.path. */
-    public Path resolveDataDir() {
-        if (dataPath != null && !dataPath.isBlank()) {
-            return absolute(Path.of(dataPath));
+    private static IllegalArgumentException unknownKey(String key) {
+        Set<String> supported = new HashSet<>(COMMON_KEYS);
+        supported.addAll(MOMENTUM_KEYS);
+        supported.addAll(LEGACY_KEYS.keySet());
+        String closest = null;
+        int bestDistance = Integer.MAX_VALUE;
+        for (String candidate : supported) {
+            int distance = editDistance(key, candidate);
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                closest = candidate;
+            }
         }
-        return projectRoot.resolve("data");
+        String suggestion = LEGACY_KEYS.getOrDefault(closest, closest);
+        String suffix = bestDistance <= Math.max(2, key.length() / 3)
+            ? " Did you mean '" + suggestion + "'?" : "";
+        return new IllegalArgumentException("Unknown config key '" + key + "'." + suffix);
     }
 
-    public Path resolveOutputDir() {
-        return absolute(Path.of(outputDir));
-    }
-
-    /** Resolve the optional symbols file; returns null when not configured. */
-    public LocalDate startDate() {
-        return startDate;
-    }
-
-    /** Optional inclusive end date; data after this date is ignored. Returns null when not configured. */
-    public LocalDate endDate() {
-        return endDate;
-    }
-
-    public Path resolveSymbolsFile() {
-        if (symbolsFile == null || symbolsFile.isBlank()) {
-            return null;
+    private static int editDistance(String left, String right) {
+        int[] previous = new int[right.length() + 1];
+        int[] current = new int[right.length() + 1];
+        for (int j = 0; j <= right.length(); j++) {
+            previous[j] = j;
         }
-        return absolute(Path.of(symbolsFile));
-    }
-
-    /** Resolve the optional sector-map CSV (symbol,sector); returns null when not configured. */
-    public Path resolveSectorFile() {
-        if (sectorFile == null || sectorFile.isBlank()) {
-            return null;
+        for (int i = 1; i <= left.length(); i++) {
+            current[0] = i;
+            for (int j = 1; j <= right.length(); j++) {
+                int substitution = previous[j - 1] + (left.charAt(i - 1) == right.charAt(j - 1) ? 0 : 1);
+                current[j] = Math.min(Math.min(previous[j] + 1, current[j - 1] + 1), substitution);
+            }
+            int[] swap = previous;
+            previous = current;
+            current = swap;
         }
-        return absolute(Path.of(sectorFile));
+        return previous[right.length()];
     }
 
-    /**
-     * Maximum holdings allowed from a single sector each rebalance (0 disables the cap).
-     * Always 0 when market.sector is set: every name shares one sector, so the cap would
-     * only block exit.n buffer retention.
-     */
-    public int maxPerSector() {
-        return marketSector() != null ? 0 : maxPerSector;
+    private static String value(Properties properties, String key, String fallback) {
+        String value = properties.getProperty(key);
+        return value == null ? fallback : value.trim();
     }
 
-    /** Sector the universe is restricted to (matched case-insensitively); null when not configured. */
-    public String marketSector() {
-        return marketSector.isBlank() ? null : marketSector;
-    }
-
-    private Path absolute(Path candidate) {
-        return candidate.isAbsolute() ? candidate : projectRoot.resolve(candidate);
-    }
-
-    /**
-     * Starting capital: each of the effective book slots (exit.n when set, else top.n)
-     * is funded with capital.per.stock. The book can grow up to exit.n holdings, so the
-     * baseline reserves capital for the full capacity even though only top.n names are
-     * entered on the first deployment.
-     */
-    public double effectiveInitialCapital() {
-        return effectiveExitN() * capitalPerStock;
-    }
-
-    /** A symbol is never entered before it has this many tracked daily bars. */
-    public int effectiveMinHistoryDays() {
-        return Math.max(minHistoryDays, lookbackDays);
-    }
-
-    public int lookbackDays() {
-        return lookbackDays;
-    }
-
-    public int topN() {
-        return topN;
-    }
-
-    /** Raw exit.n as configured (0 = disabled, i.e. exit when a holding leaves the top.n). */
-    public int exitN() {
-        return exitN;
-    }
-
-    /**
-     * Effective exit rank / maximum book size. When exit.n is unset (0) this is top.n, so a
-     * holding is dropped as soon as it falls out of the top.n. When exit.n is set, holdings
-     * are retained until they fall out of the top exit.n and the book may hold up to exit.n
-     * names (top.n are always entered; older names linger in the buffer between them).
-     */
-    public int effectiveExitN() {
-        return exitN <= 0 ? topN : exitN;
-    }
-
-    public double capitalPerStock() {
-        return capitalPerStock;
-    }
-
-    public double monthlyContribution() {
-        return monthlyContribution;
-    }
-
-    /** Hard stop: exit a holding intra-period if it falls this % below its period entry price (0 disables). */
-    public double stopLossPct() {
-        return stopLossPct;
-    }
-
-    /** Trailing stop: exit a holding if it falls this % below its peak since entry (0 disables). */
-    public double trailingStopPct() {
-        return trailingStopPct;
-    }
-
-    public String allocationMode() {
-        return allocationMode;
-    }
-
-    public String rebalanceMode() {
-        return rebalanceMode;
-    }
-
-    /** Id of the pluggable strategy to run (default 'momentum'); resolved by RotationStrategies. */
-    public String strategy() {
-        return strategy;
-    }
-
-    public String outputPrefix() {
-        return outputPrefix;
-    }
-
-    public boolean verbose() {
-        return verbose;
-    }
-
-    /** Write the self-contained HTML reporting portal alongside the CSV reports. */
-    public boolean portalEnabled() {
-        return portalEnabled;
-    }
-
-    /** Config file this configuration was loaded from (recorded in the run manifest). */
-    public Path sourceFile() {
-        return sourceFile;
-    }
-
-    /** Directory relative config paths resolve from (the working directory). */
-    public Path projectRoot() {
-        return projectRoot;
-    }
-
-    private static String stringProp(Properties props, String key, String def) {
-        String value = props.getProperty(key);
-        return value == null ? def : value.trim();
-    }
-
-    private static int intProp(Properties props, String key, int def) {
-        String value = props.getProperty(key);
-        if (value == null || value.isBlank()) {
-            return def;
-        }
-        return Integer.parseInt(value.trim());
-    }
-
-    private static double doubleProp(Properties props, String key, double def) {
-        String value = props.getProperty(key);
-        if (value == null || value.isBlank()) {
-            return def;
-        }
-        return Double.parseDouble(value.trim());
-    }
-
-    private static boolean booleanProp(Properties props, String key, boolean def) {
-        String value = props.getProperty(key);
-        if (value == null || value.isBlank()) {
-            return def;
-        }
-        return Boolean.parseBoolean(value.trim());
-    }
-
-    private static LocalDate localDateProp(Properties props, String key, LocalDate def) {
-        String value = props.getProperty(key);
-        if (value == null || value.isBlank()) {
-            return def;
-        }
-        return LocalDate.parse(value.trim());
-    }
+    public CommonConfig common() { return common; }
+    public MomentumConfig momentum() { return momentum; }
+    public String strategy() { return strategy; }
+    public Path sourceFile() { return sourceFile; }
+    public Path projectRoot() { return common.projectRoot(); }
+    public Path resolveDataDir() { return common.resolveDataDir(); }
+    public Path resolveOutputDir() { return common.resolveOutputDir(); }
+    public Path resolveSymbolsFile() { return common.resolveSymbolsFile(); }
+    public Path resolveSectorFile() { return common.resolveSectorFile(); }
+    public LocalDate startDate() { return common.startDate(); }
+    public LocalDate endDate() { return common.endDate(); }
+    public String marketSector() { return common.marketSector(); }
+    public int lookbackDays() { return momentum.lookbackDays(); }
+    public int topN() { return momentum.topN(); }
+    public int exitN() { return momentum.exitN(); }
+    public int effectiveExitN() { return momentum.effectiveExitN(); }
+    public double effectiveInitialCapital() { return momentum.effectiveInitialCapital(); }
+    public int effectiveMinHistoryDays() { return momentum.effectiveMinHistoryDays(); }
+    public double capitalPerStock() { return momentum.capitalPerStock(); }
+    public double monthlyContribution() { return momentum.monthlyContribution(); }
+    public double stopLossPct() { return momentum.stopLossPct(); }
+    public double trailingStopPct() { return momentum.trailingStopPct(); }
+    public String allocationMode() { return momentum.allocationMode(); }
+    public String rebalanceMode() { return momentum.rebalanceMode(); }
+    public int maxPerSector() { return common.marketSector() == null ? momentum.maxPerSector() : 0; }
+    public String outputPrefix() { return common.outputPrefix(); }
+    public String outputDir() { return common.outputDir(); }
+    public boolean verbose() { return common.verbose(); }
+    public boolean portalEnabled() { return common.portalEnabled(); }
 }

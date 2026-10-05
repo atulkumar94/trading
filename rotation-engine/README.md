@@ -41,7 +41,7 @@ The engine is designed around a simple idea:
 
 The project reads settings from [config/rotation.properties](config/rotation.properties).
 
-This file controls:
+Shared pipeline settings and the active strategy's settings live in this file:
 
 - the data source
 - the stock data path
@@ -51,6 +51,13 @@ This file controls:
 - optional symbol filtering
 - optional single-sector universe (`market.sector`)
 - the strategy to run (`strategy`, default `momentum`)
+
+`Main` parses `--config` and `daily-refresh` and delegates both modes to one
+`BacktestPipeline`: ingest -> filter -> snapshot -> run -> report. `DailyRefreshJob`
+is a compatibility wrapper over that same pipeline. Shared keys remain unprefixed;
+momentum keys use `momentum.*`. Legacy unprefixed momentum keys still work with a
+deprecation warning, and namespaced values take precedence. Unknown keys fail with
+a closest-match suggestion.
 
 The most important setting here is the input path:
 
@@ -102,7 +109,7 @@ start date the lookback window and the min-history eligibility counts are
 already filled from the sessions before it:
 
 - the first rebalance executes at the open of the first session on/after `start.date`
-  (ranked on the prior session's close), then the `rebalance.mode` cadence follows
+  (ranked on the prior session's close), then the `momentum.rebalance.mode` cadence follows
 - no trades, equity rows or yearly rows are produced before `start.date`
 - if `start.date` is at (or before) the start of the history, there is nothing to warm up
   from, so the first rebalance waits until the lookback is complete (see below)
@@ -112,17 +119,17 @@ already filled from the sessions before it:
 Rebalances are counted in **trading sessions**, not calendar dates:
 
 1. **First rebalance:** the earliest session (no earlier than `start.date`) whose
-   prior session has a full `lookback.days` window and at least one eligible symbol.
-2. **After that:** every N trading sessions, set by `rebalance.mode`:
+  prior session has a full `momentum.lookback.days` window and at least one eligible symbol.
+2. **After that:** every N trading sessions, set by `momentum.rebalance.mode`:
 
-| `rebalance.mode` | Rebalance every |
+| `momentum.rebalance.mode` | Rebalance every |
 |------------------|-----------------|
 | `weekly`         | 5 trading sessions |
 | `monthly_twice`  | 10 trading sessions (default) |
 | `monthly`        | 20 trading sessions |
 
 Each decision is ranked on the signal session's close and executed at the next
-session's open. Example: history starts 2010-01-04 and `lookback.days=90`, so the
+session's open. Example: history starts 2010-01-04 and `momentum.lookback.days=90`, so the
 90th session (2010-05-14) is the first signal, the first trade is at the open of
 2010-05-17, and with `monthly` the next is 20 sessions later (2010-06-14).
 
@@ -140,7 +147,7 @@ default and daily refresh modes):
 - `market.sector` — keep only symbols whose `sector` in `sector.file` matches
   (case-insensitive), e.g. `market.sector=Healthcare`. Requires `sector.file`;
   the run fails if no symbol has that sector. Because every remaining name shares
-  one sector, `max.per.sector` is ignored while this is set.
+  one sector, `momentum.max.per.sector` is ignored while this is set.
 
 Snapshots and backtest outputs then cover only the filtered symbols.
 
@@ -256,7 +263,7 @@ The active goal is:
 - yearly reporting summaries
 - data preparation for a scheduled market monitoring pipeline
 
-The backtest is simulated by `RotationEngine`; the daily reports independently replay its fills and reconcile portfolio values. With `allocation.mode=compound`, the current portfolio value is reinvested at each rebalance. `fixed_principal` redeploys the configured principal instead.
+The backtest is simulated by `BacktestRunner`; the daily reports independently replay its fills and reconcile portfolio values. With `momentum.allocation.mode=compound`, the current portfolio value is reinvested at each rebalance. `fixed_principal` redeploys the configured principal instead.
 
 ---
 
@@ -267,7 +274,7 @@ The engine does not allow a stock to be selected before it has enough history.
 It enforces:
 
 ```text
-max(min.history.days, lookback.days)
+max(momentum.min.history.days, momentum.lookback.days)
 ```
 
 This means a stock must have at least as much tracked history as the lookback requirement before it becomes eligible.
@@ -454,34 +461,22 @@ public interface Strategy {
 
 Exit criteria are therefore **strategy-owned but optional**: a strategy returns an
 `ExitPolicy` (e.g. `StopLossExitPolicy` for hard/trailing stops) when it wants intra-period
-exits, or leaves the `ExitPolicy.NONE` default when it does not. The engine simply runs
-whatever policy it is given.
+exits, or leaves the `ExitPolicy.NONE` default when it does not. `BacktestExecution` applies
+the policy; strategy code does not fill orders or mutate account state.
 
 The default implementation is `MomentumRotationStrategy` (trailing-lookback-return
 ranking with the optional sector cap and exit buffer, a fixed-session rebalance cadence
-from `rebalance.mode`, and a `StopLossExitPolicy` built from `stop.loss.pct` /
-`trailing.stop.pct`). It is selected by the config key:
+from `momentum.rebalance.mode`, and a `StopLossExitPolicy` built from
+`momentum.stop.loss.pct` / `momentum.trailing.stop.pct`). It is selected by the config key:
 
 ```text
 strategy=momentum
 ```
 
-### Plugging in a new strategy
-
-1. Implement `Strategy` in `com.rotation.strategy`. Return intents and diagnostic snapshots
-  from `onClose`; do not place fills or modify portfolio/accounting state. Supply an
-  `exitPolicy()` only if the strategy uses intra-period exits.
-2. Register it in `RotationStrategies.create(...)` under a new `strategy` name.
-3. Set `strategy=<yourname>` in [config/rotation.properties](config/rotation.properties) and run.
-
-For quick experiments you can also inject one directly without touching the factory:
-
-```java
-BacktestResult result = new RotationEngine(config, new MyStrategy(config)).run(bars);
-```
-
-Because only the signal layer changes, every output CSV, the daily reports, and
-the portal keep working unchanged.
+Momentum is the only registered strategy. The manifest stores the active strategy's
+parameters in `strategy` and shared data/date/universe settings in `common_config`.
+The contract is signal-only: strategy code returns intents and diagnostic snapshots;
+execution, account mutation, and output projection remain in common layers.
 
 ## How to run it
 
@@ -502,10 +497,13 @@ This will:
 
 ## Main project files
 
-- `Main.java` — entry point
-- `RotationConfig.java` — loads all settings
+- `Main.java` — command-line argument parsing
+- `config/CommonConfig.java` + `MomentumConfig.java` — shared and strategy settings
+- `RotationConfig.java` — backward-compatible configuration facade
 - `RotationEngine.java` — compatibility facade
+- `pipeline/BacktestPipeline.java` — single ingest, snapshot, run, and report workflow
 - `runner/BacktestRunner.java` — single daily driver and diagnostics/report orchestration
+- `job/DailyRefreshJob.java` — compatibility adapter to the shared pipeline
 - `market/MarketData.java` + `MarketView.java` — backward-only point-in-time market access
 - `indicators/IndicatorCache.java` — cached SMA, ATR, ADX, returns, and rolling low
 - `execution/ExecutionModel.java` + `BacktestExecution.java` — next-open fill and protective-stop mechanics
@@ -515,7 +513,7 @@ This will:
 - `strategy/ExitPolicy.java` + `StopLossExitPolicy.java` — optional, strategy-supplied intra-period exit rule
 - `MinuteHistoryDailyBarLoader.java` — loads external daily/history CSVs
 - `CsvExporter.java` — writes CSV reports
-- `DailyValuationBuilder.java` / `ReportReconciler.java` / `PerformanceCalculator.java` — daily accounting, reconciliation, range metrics
+- `report/DailyValuationBuilder.java` / `ReportReconciler.java` / `PerformanceCalculator.java` — daily accounting, reconciliation, range metrics
 - `DailyReportExporter.java` / `RunManifestBuilder.java` / `PortalExporter.java` — daily CSVs, run manifest, HTML portal
 - `job/DailyReportJob.java` — orchestrates the daily reports after `CsvExporter`
 

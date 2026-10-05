@@ -25,7 +25,7 @@ import com.rotation.strategy.MomentumRotationStrategy;
  */
 public final class RunManifestBuilder {
 
-    public static final int SCHEMA_VERSION = 1;
+    public static final int SCHEMA_VERSION = 2;
 
     /** Valuation and timing conventions, shown verbatim in the portal's run details. */
     public static final List<String> CONVENTIONS = List.of(
@@ -61,6 +61,7 @@ public final class RunManifestBuilder {
         j.field("output_prefix", config.outputPrefix());
 
         j.name("strategy").beginObject();
+        j.field("name", config.strategy());
         j.field("lookback_days", config.lookbackDays());
         j.field("top_n", config.topN());
         j.field("exit_n", config.exitN());
@@ -75,8 +76,11 @@ public final class RunManifestBuilder {
         j.field("trailing_stop_pct", config.trailingStopPct(), 4);
         j.field("min_history_days", config.effectiveMinHistoryDays());
         j.field("max_per_sector", config.maxPerSector());
-        j.field("market_sector", config.marketSector());
         j.field("sector_file", relative(config.projectRoot(), config.resolveSectorFile()));
+        j.endObject();
+
+        j.name("common_config").beginObject();
+        j.field("market_sector", config.marketSector());
         j.field("symbols_file", relative(config.projectRoot(), config.resolveSymbolsFile()));
         j.field("start_date", config.startDate());
         j.field("end_date", config.endDate());

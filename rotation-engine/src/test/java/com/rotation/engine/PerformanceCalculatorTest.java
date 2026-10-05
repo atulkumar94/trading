@@ -2,6 +2,7 @@ package com.rotation.engine;
 
 import com.rotation.model.DailyPortfolioRow;
 import com.rotation.model.RangeMetrics;
+import com.rotation.report.PerformanceCalculator;
 import org.junit.jupiter.api.Test;
 
 import java.time.DayOfWeek;

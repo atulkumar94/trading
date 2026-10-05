@@ -1,11 +1,10 @@
-package com.rotation.engine;
+package com.rotation.report;
 
 import com.rotation.model.BacktestResult;
 import com.rotation.model.DailyBars;
 import com.rotation.model.DailyPortfolioRow;
 import com.rotation.model.DailyPositionRow;
 import com.rotation.model.DailyValuation;
-import com.rotation.model.EquityRow;
 import com.rotation.model.HoldingsRow;
 import com.rotation.model.ReconciliationReport;
 import com.rotation.model.ReconciliationReport.Check;

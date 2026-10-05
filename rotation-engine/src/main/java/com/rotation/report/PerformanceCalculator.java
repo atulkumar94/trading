@@ -1,4 +1,4 @@
-package com.rotation.engine;
+package com.rotation.report;
 
 import com.rotation.model.DailyPortfolioRow;
 import com.rotation.model.RangeMetrics;

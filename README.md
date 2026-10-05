@@ -8,8 +8,8 @@ End-to-end pipeline: download NSE daily OHLCV data, normalize it into market sna
 symbols.csv
     ↓  download_nse_data.py (yfinance)
 stocks/daily/{SYMBOL}.csv
-    ↓  rotation-engine: MinuteHistoryDailyBarLoader → DailyBars
-filter (end.date / symbols.file / market.sector) — full history kept for lookback warm-up
+    ↓  BacktestPipeline: MinuteHistoryDailyBarLoader → DailyBars → validate/filter
+(end.date / symbols.file / market.sector) — full history kept for lookback warm-up
     ↓  MarketSnapshotExporter
 rotation_daily_market_snapshot.csv   ← single source of truth
     ↓  SnapshotDailyBarLoader (reload)
@@ -38,10 +38,11 @@ stocksData/
     ├── output/rotation/               ← Generated CSV reports (gitignored)
     └── src/
         ├── main/java/com/rotation/
-        │   ├── Main.java              ← Entry point / orchestration
-        │   ├── config/                ← RotationConfig
+        │   ├── Main.java              ← CLI argument parsing
+        │   ├── config/                ← CommonConfig, MomentumConfig, RotationConfig facade
         │   ├── data/                  ← Loaders (MinuteHistory, Snapshot)
         │   ├── engine/                ← RotationEngine compatibility facade
+        │   ├── pipeline/              ← Shared ingest-to-report workflow
         │   ├── runner/                ← BacktestRunner day loop and strategy coordination
         │   ├── market/                 ← MarketData and backward-only MarketView
         │   ├── indicators/             ← Cached point-in-time indicators
@@ -95,17 +96,21 @@ All settings live in [rotation-engine/config/rotation.properties](rotation-engin
 | `start.date` | Optional first trading date. History before it is still loaded and used for the lookback, so the first rebalance executes on the start date itself (it only waits `lookback.days` when no earlier history exists) |
 | `end.date` | Optional inclusive end date; data after it is dropped |
 | `symbols.file` | Optional CSV with a `symbol` column to restrict the universe |
-| `sector.file` / `max.per.sector` | Sector diversification cap (default `../symbols.csv`) |
-| `market.sector` | Optional: run on one sector only (e.g. `Healthcare`, case-insensitive, must exist in `sector.file`). Disables `max.per.sector` |
-| `lookback.days` | Momentum lookback in trading sessions |
-| `top.n` / `exit.n` | Names entered / rank threshold before exit |
-| `strategy` | Pluggable signal logic — rebalance schedule, ranking/selection, and optional intra-period exits (default `momentum`); see the engine README's *Pluggable strategy* section to add your own |
-| `rebalance.mode` | Trading-session cadence after the first rebalance (which runs as soon as the lookback is complete): `weekly` = every 5 sessions, `monthly_twice` = every 10, `monthly` = every 20 |
-| `capital.per.stock`, `allocation.mode`, `monthly.contribution` | Sizing |
-| `stop.loss.pct` / `trailing.stop.pct` | Intra-period exits |
-| `min.history.days` | Eligibility (engine enforces `max(min.history.days, lookback.days)`) |
+| `sector.file` / `momentum.max.per.sector` | Sector diversification cap (default `../symbols.csv`) |
+| `market.sector` | Optional: run on one sector only (e.g. `Healthcare`, case-insensitive, must exist in `sector.file`). Disables `momentum.max.per.sector` |
+| `momentum.lookback.days` | Momentum lookback in trading sessions |
+| `momentum.top.n` / `momentum.exit.n` | Names entered / rank threshold before exit |
+| `strategy` | Active signal logic (currently `momentum`) |
+| `momentum.rebalance.mode` | Trading-session cadence: `weekly` = every 5 sessions, `monthly_twice` = every 10, `monthly` = every 20 |
+| `momentum.capital.per.stock`, `momentum.allocation.mode`, `momentum.monthly.contribution` | Sizing |
+| `momentum.stop.loss.pct` / `momentum.trailing.stop.pct` | Intra-period exits |
+| `momentum.min.history.days` | Eligibility (effective threshold is `max(momentum.min.history.days, momentum.lookback.days)`) |
 | `output.dir` / `output.prefix` | Report location and file prefix |
 | `portal.enabled` | Write the self-contained HTML reporting portal (default `true`) |
+
+Unprefixed historical momentum keys remain accepted with a deprecation warning. If both a
+legacy key and its `momentum.*` form are set, the namespaced value wins. Unknown keys fail
+with a closest-match suggestion.
 
 ## Outputs
 

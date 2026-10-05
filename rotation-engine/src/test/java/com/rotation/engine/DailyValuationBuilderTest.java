@@ -10,6 +10,7 @@ import com.rotation.model.DailyValuation;
 import com.rotation.portfolio.Fill;
 import com.rotation.model.SymbolDailyCandles;
 import com.rotation.model.TradeLedgerRow;
+import com.rotation.report.DailyValuationBuilder;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDate;

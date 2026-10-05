@@ -1033,8 +1033,11 @@
         rebalance_mode: 'Rebalance mode', rebalance_interval_sessions: 'Sessions between rebalances', allocation_mode: 'Allocation',
         capital_per_stock: 'Capital per stock', initial_capital: 'Initial capital', monthly_contribution: 'Monthly contribution',
         stop_loss_pct: 'Stop loss %', trailing_stop_pct: 'Trailing stop %', min_history_days: 'Min history (effective)',
-        max_per_sector: 'Max per sector', market_sector: 'Market sector', sector_file: 'Sector file', symbols_file: 'Symbols file',
-        start_date: 'start.date', end_date: 'end.date', data_path: 'Data path',
+        max_per_sector: 'Max per sector', sector_file: 'Sector file',
+      })),
+      panel('Common pipeline configuration', null, kv(m.common_config || {}, {
+        market_sector: 'Market sector', symbols_file: 'Symbols file', start_date: 'start.date',
+        end_date: 'end.date', data_path: 'Data path',
       })),
       panel('Run & coverage', null, kv(Object.assign({ generated_at: m.generated_at, config_file: m.config_file, output_dir: m.output_dir }, cov), {
         generated_at: 'Generated', config_file: 'Config file', output_dir: 'Output directory',
