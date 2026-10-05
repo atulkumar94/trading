@@ -1,18 +1,5 @@
 package com.rotation.report;
 
-import com.rotation.model.BacktestResult;
-import com.rotation.model.DailyBars;
-import com.rotation.model.DailyPortfolioRow;
-import com.rotation.model.DailyPositionRow;
-import com.rotation.model.DailyValuation;
-import com.rotation.model.HoldingsRow;
-import com.rotation.model.ReconciliationReport;
-import com.rotation.model.ReconciliationReport.Check;
-import com.rotation.model.RebalanceRecord;
-import com.rotation.model.TradeLedgerRow;
-import com.rotation.model.TradebookRow;
-import com.rotation.model.YearEndEquity;
-
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -21,6 +8,19 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+
+import com.rotation.model.BacktestResult;
+import com.rotation.model.DailyBars;
+import com.rotation.model.DailyPortfolioRow;
+import com.rotation.model.DailyPositionRow;
+import com.rotation.model.DailyValuation;
+import com.rotation.model.HoldingsRow;
+import com.rotation.model.RebalanceRecord;
+import com.rotation.model.ReconciliationReport;
+import com.rotation.model.ReconciliationReport.Check;
+import com.rotation.model.TradeLedgerRow;
+import com.rotation.model.TradebookRow;
+import com.rotation.model.YearEndEquity;
 
 /**
  * Cross-checks the daily reports against each other and against the engine's existing

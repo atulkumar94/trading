@@ -1,4 +1,4 @@
-package com.rotation.runner;
+package com.rotation.engine;
 
 import java.time.LocalDate;
 import java.time.YearMonth;
@@ -12,13 +12,6 @@ import java.util.Map;
 import java.util.TreeSet;
 
 import com.rotation.config.RotationConfig;
-import com.rotation.execution.BacktestExecution;
-import com.rotation.execution.ExecutionModel;
-import com.rotation.execution.ExecutionResult;
-import com.rotation.execution.PendingRebalance;
-import com.rotation.execution.StopExecutionResult;
-import com.rotation.market.MarketData;
-import com.rotation.market.MarketView;
 import com.rotation.model.BacktestResult;
 import com.rotation.model.DailyBars;
 import com.rotation.model.DailyMark;
@@ -28,19 +21,26 @@ import com.rotation.model.LookbackRow;
 import com.rotation.model.PerformanceRow;
 import com.rotation.model.TradebookRow;
 import com.rotation.model.YearEndEquity;
+import com.rotation.market.MarketData;
+import com.rotation.market.MarketView;
 import com.rotation.portfolio.FinalPortfolioMark;
 import com.rotation.portfolio.Ledger;
 import com.rotation.portfolio.Portfolio;
 import com.rotation.portfolio.RebalanceEvent;
+import com.rotation.execution.ExecutionModel;
+import com.rotation.execution.ExecutionResult;
+import com.rotation.execution.PendingRebalance;
+import com.rotation.execution.StopExecutionResult;
+import com.rotation.report.RebalanceLogger;
 import com.rotation.report.BacktestReportBuilder;
 import com.rotation.report.BacktestReports;
-import com.rotation.report.RebalanceLogger;
 import com.rotation.strategy.Candidate;
-import com.rotation.strategy.Diagnostic;
-import com.rotation.strategy.OrderIntent;
 import com.rotation.strategy.RotationStrategies;
 import com.rotation.strategy.Strategy;
 import com.rotation.strategy.StrategyContext;
+import com.rotation.strategy.Diagnostic;
+import com.rotation.strategy.OrderIntent;
+import com.rotation.execution.BacktestExecution;
 
 /**
  * Fixed-schedule top-N momentum rotation engine.
@@ -489,7 +489,7 @@ public final class BacktestRunner {
         diagnosticsReadIndex = allDiagnostics.size();
         boolean rebalanceEvent = emitted.stream().anyMatch(diagnostic ->
                 diagnostic.kind == Diagnostic.Kind.REBALANCE && diagnostic.rebalanceEvent);
-        return new PendingClose(intents, emitted, rebalanceEvent);
+        return new PendingClose(market.sessionIndex(), intents, emitted, rebalanceEvent);
     }
 
     private static List<String> selectedFrom(List<OrderIntent> intents) {
@@ -552,11 +552,14 @@ public final class BacktestRunner {
     }
 
     private static final class PendingClose {
+        final int signalIndex;
         final List<OrderIntent> intents;
         final List<Diagnostic> diagnostics;
         final boolean rebalanceEvent;
 
-        PendingClose(List<OrderIntent> intents, List<Diagnostic> diagnostics, boolean rebalanceEvent) {
+        PendingClose(int signalIndex, List<OrderIntent> intents, List<Diagnostic> diagnostics,
+                     boolean rebalanceEvent) {
+            this.signalIndex = signalIndex;
             this.intents = intents;
             this.diagnostics = diagnostics;
             this.rebalanceEvent = rebalanceEvent;

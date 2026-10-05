@@ -1,5 +1,16 @@
 package com.rotation.engine;
 
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.Test;
+
 import com.rotation.model.BacktestResult;
 import com.rotation.model.DailyBars;
 import com.rotation.model.DailyCandle;
@@ -7,18 +18,10 @@ import com.rotation.model.DailyMark;
 import com.rotation.model.DailyPortfolioRow;
 import com.rotation.model.DailyPositionRow;
 import com.rotation.model.DailyValuation;
-import com.rotation.portfolio.Fill;
 import com.rotation.model.SymbolDailyCandles;
 import com.rotation.model.TradeLedgerRow;
+import com.rotation.portfolio.Fill;
 import com.rotation.report.DailyValuationBuilder;
-import org.junit.jupiter.api.Test;
-
-import java.time.LocalDate;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-
-import static org.junit.jupiter.api.Assertions.*;
 
 /** Average-cost accounting on a hand-built fill sequence with known answers. */
 class DailyValuationBuilderTest {

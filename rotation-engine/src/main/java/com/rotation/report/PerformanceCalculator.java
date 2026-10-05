@@ -1,12 +1,12 @@
 package com.rotation.report;
 
-import com.rotation.model.DailyPortfolioRow;
-import com.rotation.model.RangeMetrics;
-
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
+
+import com.rotation.model.DailyPortfolioRow;
+import com.rotation.model.RangeMetrics;
 
 /**
  * Range performance from the daily portfolio (time-weighted, contribution-adjusted).

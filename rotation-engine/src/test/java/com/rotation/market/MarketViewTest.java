@@ -1,10 +1,5 @@
 package com.rotation.market;
 
-import com.rotation.model.DailyBars;
-import com.rotation.model.DailyCandle;
-import com.rotation.model.SymbolDailyCandles;
-import org.junit.jupiter.api.Test;
-
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
@@ -12,6 +7,11 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.Test;
+
+import com.rotation.model.DailyBars;
+import com.rotation.model.DailyCandle;
+import com.rotation.model.SymbolDailyCandles;
 
 class MarketViewTest {
 

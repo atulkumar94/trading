@@ -1,3 +1,27 @@
+function getStepLogger(manager) {
+    try {
+        if (manager && typeof manager.getLogger === "function") {
+            return manager.getLogger();
+        }
+    }
+    catch (_error) {
+        // Ignore and fall back to console logger.
+    }
+    return {
+        info: function (message) { if (typeof console !== "undefined" && console.log) { console.log(message); } },
+        warn: function (message) { if (typeof console !== "undefined" && console.warn) { console.warn(message); } },
+        error: function (message) { if (typeof console !== "undefined" && console.error) { console.error(message); } },
+        severe: function (message) { if (typeof console !== "undefined" && console.error) { console.error(message); } }
+    };
+}
+
+/**
+ * STEP Business Rule
+ * Trademark: AI Labz Ltd (TM)
+ * Purpose: Describe the rule intent and expected side effects.
+ * Notes: Keep transactions short and avoid repeated writes in loops.
+ */
+
 /*
  * Rotation backtest portal (read-only). Displays, filters and charts the data the
  * engine embedded in #portal-data. Financial figures come from the engine; the
@@ -30,6 +54,10 @@
 
   // ------------------------------------------------------------------ boot
 
+  /**
+ * STEP business rule function: boot.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ */
   function boot() {
     try {
       if (!M || !LWC) throw new Error('Embedded scripts did not load.');
@@ -50,6 +78,12 @@
     }
   }
 
+  /**
+ * STEP business rule function: showFatal.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ * @param {*} message
+ * @param {*} err
+ */
   function showFatal(message, err) {
     const box = document.querySelector('#loading .state-box');
     replaceKids(box, h('p', { class: 'loss', text: message }),
@@ -59,6 +93,11 @@
     console.error(err);
   }
 
+  /**
+ * STEP business rule function: index.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ * @param {*} data
+ */
   function index(data) {
     const x = {};
     x.sessions = data.sessions;
@@ -130,12 +169,21 @@
     return x;
   }
 
+  /**
+ * STEP business rule function: splitList.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ * @param {*} s
+ */
   function splitList(s) {
     return s ? s.split(',').filter(Boolean) : [];
   }
 
   // ------------------------------------------------------------------ state & context
 
+  /**
+ * STEP business rule function: readHash.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ */
   function readHash() {
     const params = new URLSearchParams(location.hash.slice(1));
     const v = params.get('v');
@@ -154,6 +202,10 @@
     if (reb > 0) S.reb = reb;
   }
 
+  /**
+ * STEP business rule function: writeHash.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ */
   function writeHash() {
     const params = new URLSearchParams();
     params.set('v', S.view);
@@ -167,6 +219,10 @@
     history.replaceState(null, '', '#' + params.toString());
   }
 
+  /**
+ * STEP business rule function: lastDate.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ */
   function lastDate() {
     return X.series.dates[X.series.dates.length - 1];
   }
@@ -195,6 +251,11 @@
     return c;
   }
 
+  /**
+ * STEP business rule function: setState.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ * @param {*} patch
+ */
   function setState(patch) {
     Object.assign(S, patch);
     render();
@@ -202,6 +263,10 @@
 
   // ------------------------------------------------------------------ toolbar
 
+  /**
+ * STEP business rule function: wireToolbar.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ */
   function wireToolbar() {
     const asOf = document.getElementById('as-of');
     const from = document.getElementById('range-from');
@@ -254,6 +319,10 @@
       + ' · generated ' + m.generated_at.replace('T', ' ').slice(0, 16);
   }
 
+  /**
+ * STEP business rule function: initTheme.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ */
   function initTheme() {
     try {
       const t = localStorage.getItem('rotation-portal-theme');
@@ -261,6 +330,11 @@
     } catch (e) { /* ignore */ }
   }
 
+  /**
+ * STEP business rule function: renderToolbar.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ * @param {*} c
+ */
   function renderToolbar(c) {
     document.getElementById('as-of').value = S.asOf;
     const from = document.getElementById('range-from');
@@ -307,6 +381,10 @@
 
   // ------------------------------------------------------------------ render
 
+  /**
+ * STEP business rule function: render.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ */
   function render() {
     const c = context();
     renderToolbar(c);
@@ -333,6 +411,12 @@
 
   // ------------------------------------------------------------------ overview
 
+  /**
+ * STEP business rule function: renderOverview.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ * @param {*} root
+ * @param {*} c
+ */
   function renderOverview(root, c) {
     const p = D.portfolio;
     const i = c.row;
@@ -407,6 +491,11 @@
     [eqChart, ddChart, retChart].forEach((ch) => ch.timeScale().fitContent());
     syncCharts([eqChart, ddChart, retChart]);
 
+    /**
+ * STEP business rule function: legendAt.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ * @param {*} k
+ */
     const legendAt = (k) => {
       replaceKids(eqLegend, legendItem(css.series1, 'Equity', money0(p.eq[k])),
         legendItem(css.reference, 'Net capital', money0(p.net[k])), h('span', { class: 'muted', text: dateLabel(X.series.dates[k]) }));
@@ -421,6 +510,11 @@
     }));
   }
 
+  /**
+ * STEP business rule function: findPeak.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ * @param {*} row
+ */
   function findPeak(row) {
     const twr = D.portfolio.twr;
     let peakRow = null;
@@ -433,6 +527,12 @@
 
   // ------------------------------------------------------------------ tradebook
 
+  /**
+ * STEP business rule function: renderTradebook.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ * @param {*} root
+ * @param {*} c
+ */
   function renderTradebook(root, c) {
     if (c.invalid || !c.range) {
       root.append(invalidRange(c));
@@ -477,6 +577,11 @@
         + 'Click a row to open its stock chart.' })));
   }
 
+  /**
+ * STEP business rule function: ledgerColumns.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ * @param {*} opts
+ */
   function ledgerColumns(opts) {
     const cols = [
       { key: 'date', label: 'Trade date', type: 'date', get: (r) => r.date },
@@ -498,16 +603,31 @@
     return opts && opts.withoutSymbol ? cols.filter((col) => col.key !== 'symbol') : cols;
   }
 
+  /**
+ * STEP business rule function: isSell.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ * @param {*} action
+ */
   function isSell(action) {
     return action === 'EXIT' || action === 'STOP' || action === 'TRIM' || action === 'DROP';
   }
 
+  /**
+ * STEP business rule function: actionClass.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ * @param {*} a
+ */
   function actionClass(a) {
     return a === 'ENTRY' || a === 'ADD' ? 'gain' : a === 'EXIT' || a === 'STOP' || a === 'DROP' ? 'loss' : 'secondary';
   }
 
   // ------------------------------------------------------------------ holdings
 
+  /**
+ * STEP business rule function: positionsAt.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ * @param {*} session
+ */
   function positionsAt(session) {
     const range = X.posBySession.get(session);
     if (!range) return [];
@@ -523,6 +643,12 @@
     return out;
   }
 
+  /**
+ * STEP business rule function: renderHoldings.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ * @param {*} root
+ * @param {*} c
+ */
   function renderHoldings(root, c) {
     const p = D.portfolio;
     const i = c.row;
@@ -603,6 +729,11 @@
 
   // ------------------------------------------------------------------ stocks
 
+  /**
+ * STEP business rule function: prices.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ * @param {*} symbol
+ */
   function prices(symbol) {
     if (!X.priceCache.has(symbol)) {
       const entry = D.prices[symbol];
@@ -611,6 +742,11 @@
     return X.priceCache.get(symbol);
   }
 
+  /**
+ * STEP business rule function: defaultStock.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ * @param {*} c
+ */
   function defaultStock(c) {
     if (S.stock) return S.stock;
     const held = positionsAt(c.session);
@@ -619,6 +755,12 @@
     return lastTrade ? lastTrade.symbol : X.symbols[0];
   }
 
+  /**
+ * STEP business rule function: renderStocks.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ * @param {*} root
+ * @param {*} c
+ */
   function renderStocks(root, c) {
     const symbol = defaultStock(c);
     const css = cssVars();
@@ -687,6 +829,11 @@
       const byTime = new Map(bars.map((b) => [b.time, b]));
       const tradesByTime = new Map();
       trades.forEach((t) => tradesByTime.set(t.date, (tradesByTime.get(t.date) || []).concat(t)));
+      /**
+ * STEP business rule function: showBar.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ * @param {*} time
+ */
       const showBar = (time) => {
         const b = byTime.get(time);
         if (!b || b.missing) {
@@ -743,6 +890,15 @@
     })));
   }
 
+  /**
+ * STEP business rule function: renderRelative.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ * @param {*} box
+ * @param {*} legend
+ * @param {*} symbol
+ * @param {*} c
+ * @param {*} css
+ */
   function renderRelative(box, legend, symbol, c, css) {
     const base = c.range.baseDate || c.range.firstSession;
     const lines = [];
@@ -773,6 +929,11 @@
       return new Map(l.data.map((pt) => [pt.time, pt.value]));
     });
     chart.timeScale().fitContent();
+    /**
+ * STEP business rule function: show.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ * @param {*} time
+ */
     const show = (time) => {
       replaceKids(legend, ...lines.map((l, k) => {
         const v = time ? lookups[k].get(time) : l.data.length ? l.data[l.data.length - 1].value : undefined;
@@ -783,6 +944,14 @@
     chart.subscribeCrosshairMove((param) => show(param && param.time ? timeKey(param.time) : null));
   }
 
+  /**
+ * STEP business rule function: rebased.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ * @param {*} bars
+ * @param {*} base
+ * @param {*} asOf
+ * @param {*} get
+ */
   function rebased(bars, base, asOf, get) {
     const inRange = bars.filter((b) => !b.missing && b.time >= base && b.time <= asOf);
     if (!inRange.length) return [];
@@ -790,6 +959,12 @@
     return inRange.map((b) => ({ time: b.time, value: 100 * get(b) / b0 }));
   }
 
+  /**
+ * STEP business rule function: rankHistory.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ * @param {*} symbol
+ * @param {*} asOf
+ */
   function rankHistory(symbol, asOf) {
     const R = D.rankings;
     const sIdx = X.symIdx.get(symbol);
@@ -808,11 +983,22 @@
     return out;
   }
 
+  /**
+ * STEP business rule function: latestRank.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ * @param {*} symbol
+ * @param {*} asOf
+ */
   function latestRank(symbol, asOf) {
     const hist = rankHistory(symbol, asOf);
     return hist.length ? hist[hist.length - 1] : null;
   }
 
+  /**
+ * STEP business rule function: openStock.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ * @param {*} symbol
+ */
   function openStock(symbol) {
     setState({ view: 'stocks', stock: symbol });
     window.scrollTo(0, 0);
@@ -820,6 +1006,12 @@
 
   // ------------------------------------------------------------------ performance
 
+  /**
+ * STEP business rule function: renderPerformance.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ * @param {*} root
+ * @param {*} c
+ */
   function renderPerformance(root, c) {
     const rows = M.presets(X.series, c.asOf).map((m) => Object.assign({ name: M.PRESET_LABELS[m.label] }, m));
     if (S.preset === 'CUSTOM' && c.range) rows.push(Object.assign({ name: 'Selected custom range' }, c.range));
@@ -894,6 +1086,12 @@
     })));
   }
 
+  /**
+ * STEP business rule function: monthlyGrid.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ * @param {*} months
+ * @param {*} years
+ */
   function monthlyGrid(months, years) {
     const byYear = new Map();
     months.forEach((m) => {
@@ -902,6 +1100,11 @@
       byYear.get(y)[+m.key.slice(5, 7) - 1] = m;
     });
     const yearMap = new Map(years.map((y) => [y.key, y]));
+    /**
+ * STEP business rule function: cell.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ * @param {*} m
+ */
     const cell = (m) => {
       if (!m) return h('td', { class: 'num muted', text: '' });
       const td = h('td', { class: 'num ' + (m.returnPct >= 0 ? 'gain' : 'loss'), title: m.key + ': ' + fmtPct(m.returnPct, 2, true)
@@ -921,6 +1124,12 @@
 
   // ------------------------------------------------------------------ rankings
 
+  /**
+ * STEP business rule function: renderRankings.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ * @param {*} root
+ * @param {*} c
+ */
   function renderRankings(root, c) {
     const available = X.rebalances.filter((r) => r.signal <= c.asOf);
     if (!available.length) {
@@ -983,6 +1192,12 @@
     renderLookback(root, c);
   }
 
+  /**
+ * STEP business rule function: renderLookback.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ * @param {*} root
+ * @param {*} c
+ */
   function renderLookback(root, c) {
     const signals = X.lookbackSignals.filter((s) => s <= c.asOf);
     const span = X.lookbackSignals.length ? X.lookbackSignals[0] + ' → ' + X.lookbackSignals[X.lookbackSignals.length - 1] : 'n/a';
@@ -1021,6 +1236,12 @@
 
   // ------------------------------------------------------------------ run details
 
+  /**
+ * STEP business rule function: renderRun.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ * @param {*} root
+ * @param {*} c
+ */
   function renderRun(root, c) {
     const m = X.manifest;
     const st = m.strategy;
@@ -1094,6 +1315,13 @@
 
   // ------------------------------------------------------------------ components
 
+  /**
+ * STEP business rule function: panel.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ * @param {*} title
+ * @param {*} scope
+ * @param {*} children
+ */
   function panel(title, scope, ...children) {
     const head = h('div', { class: 'panel-head' }, h('h2', { text: title }), h('span', { class: 'spacer' }),
       scope === 'asof' ? h('span', { class: 'scope asof', title: 'Uses the end-of-day state on the as-of date', text: 'As of' })
@@ -1101,15 +1329,35 @@
     return h('section', { class: 'panel' }, head, ...children);
   }
 
+  /**
+ * STEP business rule function: invalidRange.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ * @param {*} c
+ */
   function invalidRange(c) {
     return panel('Selected range', 'range', h('div', { class: 'notice bad', text: 'Invalid range: the From date (' + (S.from || '?')
       + ') is after the as-of date (' + c.asOf + '). Pick an earlier From date or a preset.' }));
   }
 
+  /**
+ * STEP business rule function: kpi.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ * @param {*} label
+ * @param {*} value
+ * @param {*} sub
+ */
   function kpi(label, value, sub) {
     return h('div', { class: 'kpi' }, h('div', { class: 'label', text: label }), h('div', { class: 'value' }, value), sub ? h('div', { class: 'sub' }, sub) : null);
   }
 
+  /**
+ * STEP business rule function: legendItem.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ * @param {*} color
+ * @param {*} name
+ * @param {*} value
+ * @param {*} bar
+ */
   function legendItem(color, name, value, bar) {
     return h('span', {}, color ? h('span', { class: 'key' + (bar ? ' bar' : ''), style: 'background:' + color }) : null,
       h('strong', {}, value), ' ', h('span', { text: name }));
@@ -1135,6 +1383,10 @@
     } });
     const tools = h('div', { class: 'table-tools' }, ...(opts.tools || []), search, count, h('span', { class: 'spacer', style: 'flex:1' }), exportBtn);
 
+    /**
+ * STEP business rule function: filtered.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ */
     function filtered() {
       let rows = opts.rows;
       if (state.query) {
@@ -1159,6 +1411,10 @@
       return rows;
     }
 
+    /**
+ * STEP business rule function: draw.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ */
     function draw() {
       const rows = filtered();
       const pages = Math.max(1, Math.ceil(rows.length / pageSize));
@@ -1170,6 +1426,10 @@
         const th = h('th', { scope: 'col', class: (numeric ? 'num ' : '') + (opts.sortable === false ? '' : 'sortable'),
           'aria-sort': sorted ? (state.sort.dir === 'asc' ? 'ascending' : 'descending') : null, tabindex: opts.sortable === false ? null : '0', text: col.label });
         if (opts.sortable !== false) {
+          /**
+ * STEP business rule function: toggle.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ */
           const toggle = () => {
             state.sort = { key: col.key, dir: sorted && state.sort.dir === 'desc' ? 'asc' : sorted ? 'desc' : numeric || col.type === 'date' ? 'desc' : 'asc' };
             draw();
@@ -1212,7 +1472,19 @@
     return h('div', {}, tools, wrap, pager);
   }
 
+  /**
+ * STEP business rule function: downloadCsv.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ * @param {*} name
+ * @param {*} header
+ * @param {*} rows
+ */
   function downloadCsv(name, header, rows) {
+    /**
+ * STEP business rule function: esc.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ * @param {*} v
+ */
     const esc = (v) => {
       if (v === null || v === undefined) return '';
       const s = typeof v === 'number' ? String(v) : String(v);
@@ -1229,6 +1501,10 @@
 
   // ------------------------------------------------------------------ charts
 
+  /**
+ * STEP business rule function: cssVars.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ */
   function cssVars() {
     const cs = getComputedStyle(document.documentElement);
     const v = (n) => cs.getPropertyValue(n).trim();
@@ -1239,6 +1515,11 @@
     };
   }
 
+  /**
+ * STEP business rule function: makeChart.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ * @param {*} el
+ */
   function makeChart(el) {
     const css = cssVars();
     const chart = LWC.createChart(el, {
@@ -1255,6 +1536,11 @@
     return chart;
   }
 
+  /**
+ * STEP business rule function: syncCharts.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ * @param {*} list
+ */
   function syncCharts(list) {
     let busy = false;
     list.forEach((src) => src.timeScale().subscribeVisibleLogicalRangeChange((range) => {
@@ -1265,12 +1551,23 @@
     }));
   }
 
+  /**
+ * STEP business rule function: timeKey.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ * @param {*} t
+ */
   function timeKey(t) {
     if (typeof t === 'string') return t;
     if (typeof t === 'object' && t.year) return t.year + '-' + String(t.month).padStart(2, '0') + '-' + String(t.day).padStart(2, '0');
     return new Date(t * 1000).toISOString().slice(0, 10);
   }
 
+  /**
+ * STEP business rule function: withAlpha.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ * @param {*} hex
+ * @param {*} a
+ */
   function withAlpha(hex, a) {
     const m = /^#([0-9a-f]{6})$/i.exec(hex);
     if (!m) return hex;
@@ -1281,37 +1578,103 @@
   // ------------------------------------------------------------------ formatting
 
   const numberFormats = new Map();
+  /**
+ * STEP business rule function: fmtNumber.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ * @param {*} v
+ * @param {*} dp
+ */
   function fmtNumber(v, dp) {
     if (!numberFormats.has(dp)) numberFormats.set(dp, new Intl.NumberFormat('en-IN', { minimumFractionDigits: dp, maximumFractionDigits: dp }));
     return numberFormats.get(dp).format(v);
   }
+  /**
+ * STEP business rule function: fmtInt.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ * @param {*} v
+ */
   function fmtInt(v) { return v === null || v === undefined ? '' : fmtNumber(v, 0); }
+  /**
+ * STEP business rule function: fmtMoney.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ * @param {*} v
+ * @param {*} dp
+ */
   function fmtMoney(v, dp) { return v === null || v === undefined ? '' : '₹' + fmtNumber(v, dp === undefined ? 2 : dp); }
+  /**
+ * STEP business rule function: fmtPct.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ * @param {*} v
+ * @param {*} dp
+ * @param {*} signed
+ */
   function fmtPct(v, dp, signed) {
     if (v === null || v === undefined || Number.isNaN(v)) return '';
     const s = fmtNumber(v, dp) + '%';
     return signed && v > 0 ? '+' + s : s.replace('-', '−');
   }
+  /**
+ * STEP business rule function: money.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ * @param {*} v
+ */
   function money(v) { return v === null || v === undefined ? '' : fmtNumber(v, 2); }
+  /**
+ * STEP business rule function: money0.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ * @param {*} v
+ */
   function money0(v) { return fmtMoney(v, 0); }
+  /**
+ * STEP business rule function: qty.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ * @param {*} v
+ */
   function qty(v) { return v === null || v === undefined ? '' : fmtNumber(v, Number.isInteger(v) ? 0 : 2); }
+  /**
+ * STEP business rule function: price.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ * @param {*} v
+ */
   function price(v) { return v === null || v === undefined ? '' : fmtNumber(v, Math.abs(v) < 10 ? 4 : 2); }
+  /**
+ * STEP business rule function: signedMoney.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ * @param {*} v
+ */
   function signedMoney(v) {
     if (v === null || v === undefined) return '';
     const r = Math.round(v * 100) / 100;
     const text = (r > 0 ? '+' : r < 0 ? '−' : '') + fmtNumber(Math.abs(r), 2);
     return h('span', { class: r > 0 ? 'gain' : r < 0 ? 'loss' : '', text });
   }
+  /**
+ * STEP business rule function: pct.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ * @param {*} v
+ * @param {*} dp
+ * @param {*} signed
+ */
   function pct(v, dp, signed) {
     const text = fmtPct(v, dp, signed);
     if (!signed) return text;
     return h('span', { class: v > 0 ? 'gain' : v < 0 ? 'loss' : '', text });
   }
+  /**
+ * STEP business rule function: dateLabel.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ * @param {*} iso
+ */
   function dateLabel(iso) {
     if (!iso) return '';
     return WEEKDAYS[new Date(iso + 'T00:00:00Z').getUTCDay()] + ' ' + iso;
   }
 
+  /**
+ * STEP business rule function: symbolMatch.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ * @param {*} sym
+ */
   function symbolMatch(sym) {
     if (!S.symbol) return true;
     if (X.symIdx.has(S.symbol)) return sym === S.symbol;
@@ -1336,10 +1699,21 @@
     for (let i = 2; i < arguments.length; i++) append(e, arguments[i]);
     return e;
   }
+  /**
+ * STEP business rule function: replaceKids.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ * @param {*} el
+ */
   function replaceKids(el) {
     el.replaceChildren();
     for (let i = 1; i < arguments.length; i++) append(el, arguments[i]);
   }
+  /**
+ * STEP business rule function: append.
+ * TODO: Describe purpose, side effects, and expected node/context state.
+ * @param {*} parent
+ * @param {*} kid
+ */
   function append(parent, kid) {
     if (kid === null || kid === undefined || kid === false) return;
     if (Array.isArray(kid)) { kid.forEach((k) => append(parent, k)); return; }

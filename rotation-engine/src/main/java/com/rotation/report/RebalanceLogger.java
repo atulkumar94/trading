@@ -1,13 +1,13 @@
 package com.rotation.report;
 
-import com.rotation.model.EntryDetail;
-import com.rotation.model.ExitDetail;
-import com.rotation.model.PerformanceRow;
-
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Locale;
+
+import com.rotation.model.EntryDetail;
+import com.rotation.model.ExitDetail;
+import com.rotation.model.PerformanceRow;
 
 /** Prints the human-readable per-rebalance runtime log (mirrors the reference tool). */
 public final class RebalanceLogger {

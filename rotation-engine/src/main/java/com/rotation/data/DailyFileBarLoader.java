@@ -1,8 +1,5 @@
 package com.rotation.data;
 
-import com.rotation.model.DailyCandle;
-import com.rotation.model.SymbolDailyCandles;
-
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.nio.file.DirectoryStream;
@@ -15,6 +12,9 @@ import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+
+import com.rotation.model.DailyCandle;
+import com.rotation.model.SymbolDailyCandles;
 
 /**
  * Loads daily OHLCV history files ({@code {SYMBOL}.csv} with header

@@ -1,17 +1,5 @@
 package com.rotation.report;
 
-import com.rotation.model.BacktestResult;
-import com.rotation.model.DailyBars;
-import com.rotation.model.DailyPortfolioRow;
-import com.rotation.model.DailyPositionRow;
-import com.rotation.model.DailyValuation;
-import com.rotation.model.EquityRow;
-import com.rotation.portfolio.Fill;
-import com.rotation.model.LookbackRow;
-import com.rotation.model.PerformanceRow;
-import com.rotation.model.RebalanceRecord;
-import com.rotation.model.TradeLedgerRow;
-
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
@@ -20,13 +8,24 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
 import java.util.function.ToDoubleFunction;
 import java.util.function.ToLongFunction;
+
+import com.rotation.model.BacktestResult;
+import com.rotation.model.DailyBars;
+import com.rotation.model.DailyPortfolioRow;
+import com.rotation.model.DailyPositionRow;
+import com.rotation.model.DailyValuation;
+import com.rotation.model.EquityRow;
+import com.rotation.model.LookbackRow;
+import com.rotation.model.PerformanceRow;
+import com.rotation.model.RebalanceRecord;
+import com.rotation.model.TradeLedgerRow;
+import com.rotation.portfolio.Fill;
 
 /**
  * Writes {@code {prefix}_portal.html}: a single self-contained, read-only HTML report.

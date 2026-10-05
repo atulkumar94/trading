@@ -1,16 +1,19 @@
 package com.rotation.engine;
 
-import com.rotation.model.DailyPortfolioRow;
-import com.rotation.model.RangeMetrics;
-import com.rotation.report.PerformanceCalculator;
-import org.junit.jupiter.api.Test;
-
 import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.Test;
+
+import com.rotation.model.DailyPortfolioRow;
+import com.rotation.model.RangeMetrics;
+import com.rotation.report.PerformanceCalculator;
 
 /** Range metrics on a synthetic series where every session returns exactly +1%. */
 class PerformanceCalculatorTest {

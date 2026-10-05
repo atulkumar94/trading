@@ -8,6 +8,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
+import com.rotation.market.MarketView;
 import com.rotation.model.DailyBars;
 import com.rotation.model.EntryDetail;
 import com.rotation.model.ExitDetail;
@@ -15,12 +16,11 @@ import com.rotation.model.TradebookRow;
 import com.rotation.portfolio.Fill;
 import com.rotation.portfolio.Ledger;
 import com.rotation.portfolio.Portfolio;
-import com.rotation.strategy.ExitPolicy;
 import com.rotation.strategy.Candidate;
+import com.rotation.strategy.ExitPolicy;
 import com.rotation.strategy.OrderIntent;
-import com.rotation.strategy.Strategy;
 import com.rotation.strategy.PortfolioView;
-import com.rotation.market.MarketView;
+import com.rotation.strategy.Strategy;
 
 /** Executes protective exits using close signals and next-session open prices. */
 public final class BacktestExecution implements ExecutionModel {

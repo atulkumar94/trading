@@ -1,14 +1,5 @@
 package com.rotation.strategy;
 
-import com.rotation.config.RotationConfig;
-import com.rotation.market.MarketData;
-import com.rotation.market.MarketView;
-import com.rotation.model.DailyBars;
-import com.rotation.model.DailyCandle;
-import com.rotation.model.SymbolDailyCandles;
-import com.rotation.portfolio.Portfolio;
-import org.junit.jupiter.api.Test;
-
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -19,6 +10,14 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.Test;
+
+import com.rotation.config.RotationConfig;
+import com.rotation.market.MarketData;
+import com.rotation.model.DailyBars;
+import com.rotation.model.DailyCandle;
+import com.rotation.model.SymbolDailyCandles;
+import com.rotation.portfolio.Portfolio;
 
 class MomentumStrategyTest {
 

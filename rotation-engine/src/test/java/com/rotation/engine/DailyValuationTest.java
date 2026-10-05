@@ -1,5 +1,23 @@
 package com.rotation.engine;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.DayOfWeek;
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.function.IntFunction;
+import java.util.stream.Collectors;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.Test;
+
 import com.rotation.config.RotationConfig;
 import com.rotation.model.BacktestResult;
 import com.rotation.model.DailyBars;
@@ -13,22 +31,7 @@ import com.rotation.model.SymbolDailyCandles;
 import com.rotation.model.TradeLedgerRow;
 import com.rotation.model.YearEndEquity;
 import com.rotation.report.DailyValuationBuilder;
-import com.rotation.report.PerformanceCalculator;
 import com.rotation.report.ReportReconciler;
-import org.junit.jupiter.api.Test;
-
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.time.DayOfWeek;
-import java.time.LocalDate;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.function.IntFunction;
-import java.util.stream.Collectors;
-
-import static org.junit.jupiter.api.Assertions.*;
 
 /** End-to-end daily valuation: engine run -> DailyValuationBuilder -> ReportReconciler. */
 class DailyValuationTest {

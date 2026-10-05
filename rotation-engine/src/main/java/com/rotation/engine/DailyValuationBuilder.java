@@ -1,11 +1,4 @@
-package com.rotation.report;
-
-import java.time.LocalDate;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
+package com.rotation.engine;
 
 import com.rotation.model.BacktestResult;
 import com.rotation.model.DailyBars;
@@ -13,9 +6,16 @@ import com.rotation.model.DailyMark;
 import com.rotation.model.DailyPortfolioRow;
 import com.rotation.model.DailyPositionRow;
 import com.rotation.model.DailyValuation;
-import com.rotation.model.TradeLedgerRow;
 import com.rotation.portfolio.Fill;
 import com.rotation.portfolio.Position;
+import com.rotation.model.TradeLedgerRow;
+
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 
 /**
  * Turns the engine's fills and end-of-day marks into daily accounting reports.

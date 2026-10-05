@@ -1,19 +1,5 @@
 package com.rotation.job;
 
-import com.rotation.config.RotationConfig;
-import com.rotation.data.SectorSymbolsReader;
-import com.rotation.report.DailyValuationBuilder;
-import com.rotation.report.PerformanceCalculator;
-import com.rotation.report.ReportReconciler;
-import com.rotation.model.BacktestResult;
-import com.rotation.model.DailyBars;
-import com.rotation.model.DailyValuation;
-import com.rotation.model.RangeMetrics;
-import com.rotation.model.ReconciliationReport;
-import com.rotation.report.DailyReportExporter;
-import com.rotation.report.PortalExporter;
-import com.rotation.report.RunManifestBuilder;
-
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
@@ -25,6 +11,20 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.stream.Stream;
+
+import com.rotation.config.RotationConfig;
+import com.rotation.data.SectorSymbolsReader;
+import com.rotation.model.BacktestResult;
+import com.rotation.model.DailyBars;
+import com.rotation.model.DailyValuation;
+import com.rotation.model.RangeMetrics;
+import com.rotation.model.ReconciliationReport;
+import com.rotation.report.DailyReportExporter;
+import com.rotation.report.DailyValuationBuilder;
+import com.rotation.report.PerformanceCalculator;
+import com.rotation.report.PortalExporter;
+import com.rotation.report.ReportReconciler;
+import com.rotation.report.RunManifestBuilder;
 
 /**
  * Writes the daily valuation reports, the run manifest and (optionally) the HTML

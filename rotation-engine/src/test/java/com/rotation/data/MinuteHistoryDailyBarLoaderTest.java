@@ -1,15 +1,16 @@
 package com.rotation.data;
 
-import com.rotation.model.DailyCandle;
-import com.rotation.model.SymbolDailyCandles;
-import org.junit.jupiter.api.Test;
-
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.Test;
+
+import com.rotation.model.DailyCandle;
+import com.rotation.model.SymbolDailyCandles;
 
 class MinuteHistoryDailyBarLoaderTest {
 

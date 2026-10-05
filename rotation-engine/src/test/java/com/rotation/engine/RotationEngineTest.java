@@ -1,6 +1,20 @@
 package com.rotation.engine;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.DayOfWeek;
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.Test;
+
 import com.rotation.config.RotationConfig;
+import com.rotation.market.MarketData;
 import com.rotation.model.BacktestResult;
 import com.rotation.model.DailyBars;
 import com.rotation.model.DailyCandle;
@@ -11,21 +25,9 @@ import com.rotation.model.RebalanceRecord;
 import com.rotation.model.SymbolDailyCandles;
 import com.rotation.model.TradebookRow;
 import com.rotation.model.YearEndEquity;
-import com.rotation.market.MarketData;
 import com.rotation.portfolio.Fill;
 import com.rotation.strategy.Candidate;
 import com.rotation.strategy.MomentumRotationStrategy;
-import org.junit.jupiter.api.Test;
-
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.time.DayOfWeek;
-import java.time.LocalDate;
-import java.util.ArrayList;
-import java.util.List;
-
-import static org.junit.jupiter.api.Assertions.*;
 
 class RotationEngineTest {
 
