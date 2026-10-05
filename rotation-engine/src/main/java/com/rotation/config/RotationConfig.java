@@ -17,7 +17,8 @@ public final class RotationConfig {
 
     private static final Set<String> COMMON_KEYS = Set.of(
             "strategy", "data.path", "start.date", "end.date", "symbols.file", "sector.file",
-            "market.sector", "output.dir", "output.prefix", "portal.enabled", "verbose");
+            "market.sector", "output.dir", "output.prefix", "data.validation.mode",
+            "portal.enabled", "verbose");
     private static final Set<String> MOMENTUM_KEYS = Set.of(
             "momentum.lookback.days", "momentum.top.n", "momentum.exit.n",
             "momentum.capital.per.stock", "momentum.monthly.contribution",
@@ -166,6 +167,7 @@ public final class RotationConfig {
     public int maxPerSector() { return common.marketSector() == null ? momentum.maxPerSector() : 0; }
     public String outputPrefix() { return common.outputPrefix(); }
     public String outputDir() { return common.outputDir(); }
+    public String dataValidationMode() { return common.dataValidationMode(); }
     public boolean verbose() { return common.verbose(); }
     public boolean portalEnabled() { return common.portalEnabled(); }
 }

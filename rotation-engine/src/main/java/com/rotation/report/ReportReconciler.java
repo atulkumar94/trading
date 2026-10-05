@@ -277,7 +277,20 @@ public final class ReportReconciler {
         if (staleBars > 0) {
             warnings.add(staleBars + " symbol-sessions in the daily snapshot repeat the prior bar exactly (possible forward fill by the loader)");
         }
-        warnings.add("The daily market snapshot carries no volume, so the portal charts omit volume");
+        boolean hasVolume = false;
+        for (int symbol = 0; symbol < bars.symbolCount() && !hasVolume; symbol++) {
+            for (int day = 0; day < dates.size(); day++) {
+                if (Double.isFinite(bars.volumeAt(day, symbol))) {
+                    hasVolume = true;
+                    break;
+                }
+            }
+        }
+        if (!hasVolume) {
+            warnings.add("The daily market snapshot has no finite volume values, so volume is unavailable.");
+        } else {
+            warnings.add("The daily market snapshot includes volume; the portal charts do not currently render it.");
+        }
         return new ReconciliationReport(checks, warnings);
     }
 }

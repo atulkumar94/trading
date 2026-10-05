@@ -111,7 +111,16 @@ public final class RunManifestBuilder {
             j.field(e.getKey(), e.getValue());
         }
         j.endObject();
-        j.field("volume_available", false);
+        boolean volumeAvailable = false;
+        for (int symbol = 0; symbol < bars.symbolCount() && !volumeAvailable; symbol++) {
+            for (int session = 0; session < bars.dateCount(); session++) {
+                if (Double.isFinite(bars.volumeAt(session, symbol))) {
+                    volumeAvailable = true;
+                    break;
+                }
+            }
+        }
+        j.field("volume_available", volumeAvailable);
         j.endObject();
 
         j.name("conventions").beginArray();

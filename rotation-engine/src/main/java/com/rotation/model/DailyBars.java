@@ -25,10 +25,17 @@ public final class DailyBars {
     private final double[][] highs;   // [dateIdx][symbolIdx]
     private final double[][] lows;    // [dateIdx][symbolIdx]
     private final double[][] closes;  // [dateIdx][symbolIdx]
+    private final double[][] volumes; // [dateIdx][symbolIdx]
+    private final double[][] rawCloses; // [dateIdx][symbolIdx]
+    private final double[][] adjustmentFactors; // [dateIdx][symbolIdx]
+    private final boolean[][] sourceBars; // source row exists, even when its prices are invalid
+    private final boolean[][] validBars; // [dateIdx][symbolIdx], false for absent/invalid source bars
     private final int[][] eligibility; // [dateIdx][symbolIdx]
 
     private DailyBars(List<LocalDate> dates, List<String> symbols, Map<String, Integer> symbolIndex,
-                      double[][] opens, double[][] highs, double[][] lows, double[][] closes, int[][] eligibility) {
+                      double[][] opens, double[][] highs, double[][] lows, double[][] closes,
+                      double[][] volumes, double[][] rawCloses, double[][] adjustmentFactors,
+                      boolean[][] sourceBars, boolean[][] validBars, int[][] eligibility) {
         this.dates = dates;
         this.symbols = symbols;
         this.symbolIndex = symbolIndex;
@@ -36,6 +43,11 @@ public final class DailyBars {
         this.highs = highs;
         this.lows = lows;
         this.closes = closes;
+        this.volumes = volumes;
+        this.rawCloses = rawCloses;
+        this.adjustmentFactors = adjustmentFactors;
+        this.sourceBars = sourceBars;
+        this.validBars = validBars;
         this.eligibility = eligibility;
     }
 
@@ -80,6 +92,11 @@ public final class DailyBars {
         double[][] highs = new double[rows][cols];
         double[][] lows = new double[rows][cols];
         double[][] closes = new double[rows][cols];
+        double[][] volumes = new double[rows][cols];
+        double[][] rawCloses = new double[rows][cols];
+        double[][] adjustmentFactors = new double[rows][cols];
+        boolean[][] sourceBars = new boolean[rows][cols];
+        boolean[][] validBars = new boolean[rows][cols];
         for (double[] row : opens) {
             java.util.Arrays.fill(row, Double.NaN);
         }
@@ -90,6 +107,15 @@ public final class DailyBars {
             java.util.Arrays.fill(row, Double.NaN);
         }
         for (double[] row : closes) {
+            java.util.Arrays.fill(row, Double.NaN);
+        }
+        for (double[] row : volumes) {
+            java.util.Arrays.fill(row, Double.NaN);
+        }
+        for (double[] row : rawCloses) {
+            java.util.Arrays.fill(row, Double.NaN);
+        }
+        for (double[] row : adjustmentFactors) {
             java.util.Arrays.fill(row, Double.NaN);
         }
 
@@ -107,6 +133,11 @@ public final class DailyBars {
                 highs[row][col] = candle.high();
                 lows[row][col] = candle.low();
                 closes[row][col] = candle.close();
+                volumes[row][col] = candle.volume();
+                rawCloses[row][col] = candle.rawClose();
+                adjustmentFactors[row][col] = candle.adjustmentFactor();
+                sourceBars[row][col] = true;
+                validBars[row][col] = candle.validBar();
             }
         }
 
@@ -128,7 +159,8 @@ public final class DailyBars {
             }
         }
 
-        return new DailyBars(dates, symbols, symbolIndex, opens, highs, lows, closes, eligibility);
+        return new DailyBars(dates, symbols, symbolIndex, opens, highs, lows, closes,
+            volumes, rawCloses, adjustmentFactors, sourceBars, validBars, eligibility);
     }
 
     private static void forwardFill(double[][] matrix) {
@@ -160,10 +192,12 @@ public final class DailyBars {
             for (int i = 0; i < dates.size(); i++) {
                 double open = opens[i][col];
                 double close = closes[i][col];
-                if (Double.isNaN(open) && Double.isNaN(close)) {
+                if (Double.isNaN(open) && Double.isNaN(close)
+                        && !sourceBars[i][col]) {
                     continue;
                 }
-                candles.add(new DailyCandle(dates.get(i), open, open, open, close, 0.0));
+                candles.add(new DailyCandle(dates.get(i), open, highs[i][col], lows[i][col], close,
+                    volumes[i][col], rawCloses[i][col], adjustmentFactors[i][col], validBars[i][col]));
             }
             rebuilt.add(new SymbolDailyCandles(symbol, candles));
         }
@@ -194,6 +228,11 @@ public final class DailyBars {
         double[][] highs = new double[rows][cols];
         double[][] lows = new double[rows][cols];
         double[][] closes = new double[rows][cols];
+        double[][] volumes = new double[rows][cols];
+        double[][] rawCloses = new double[rows][cols];
+        double[][] adjustmentFactors = new double[rows][cols];
+        boolean[][] sourceBars = new boolean[rows][cols];
+        boolean[][] validBars = new boolean[rows][cols];
         int[][] eligibility = new int[rows][cols];
 
         for (int i = 0; i < rows; i++) {
@@ -203,11 +242,17 @@ public final class DailyBars {
                 highs[i][j] = this.highs[sourceIdx][j];
                 lows[i][j] = this.lows[sourceIdx][j];
                 closes[i][j] = this.closes[sourceIdx][j];
+                volumes[i][j] = this.volumes[sourceIdx][j];
+                rawCloses[i][j] = this.rawCloses[sourceIdx][j];
+                adjustmentFactors[i][j] = this.adjustmentFactors[sourceIdx][j];
+                sourceBars[i][j] = this.sourceBars[sourceIdx][j];
+                validBars[i][j] = this.validBars[sourceIdx][j];
                 eligibility[i][j] = this.eligibility[sourceIdx][j];
             }
         }
 
-        return new DailyBars(filteredDates, new ArrayList<>(symbols), new HashMap<>(symbolIndex), opens, highs, lows, closes, eligibility);
+        return new DailyBars(filteredDates, new ArrayList<>(symbols), new HashMap<>(symbolIndex),
+            opens, highs, lows, closes, volumes, rawCloses, adjustmentFactors, sourceBars, validBars, eligibility);
     }
 
     public DailyBars filterTo(LocalDate endDate) {
@@ -230,6 +275,11 @@ public final class DailyBars {
         double[][] highs = new double[rows][cols];
         double[][] lows = new double[rows][cols];
         double[][] closes = new double[rows][cols];
+        double[][] volumes = new double[rows][cols];
+        double[][] rawCloses = new double[rows][cols];
+        double[][] adjustmentFactors = new double[rows][cols];
+        boolean[][] sourceBars = new boolean[rows][cols];
+        boolean[][] validBars = new boolean[rows][cols];
         int[][] eligibility = new int[rows][cols];
 
         for (int i = 0; i < rows; i++) {
@@ -238,11 +288,17 @@ public final class DailyBars {
                 highs[i][j] = this.highs[i][j];
                 lows[i][j] = this.lows[i][j];
                 closes[i][j] = this.closes[i][j];
+                volumes[i][j] = this.volumes[i][j];
+                rawCloses[i][j] = this.rawCloses[i][j];
+                adjustmentFactors[i][j] = this.adjustmentFactors[i][j];
+                sourceBars[i][j] = this.sourceBars[i][j];
+                validBars[i][j] = this.validBars[i][j];
                 eligibility[i][j] = this.eligibility[i][j];
             }
         }
 
-        return new DailyBars(filteredDates, new ArrayList<>(symbols), new HashMap<>(symbolIndex), opens, highs, lows, closes, eligibility);
+        return new DailyBars(filteredDates, new ArrayList<>(symbols), new HashMap<>(symbolIndex),
+            opens, highs, lows, closes, volumes, rawCloses, adjustmentFactors, sourceBars, validBars, eligibility);
     }
 
     public List<LocalDate> dates() {
@@ -275,6 +331,26 @@ public final class DailyBars {
 
     public double closeAt(int dateIdx, int symbolIdx) {
         return closes[dateIdx][symbolIdx];
+    }
+
+    public double volumeAt(int dateIdx, int symbolIdx) {
+        return volumes[dateIdx][symbolIdx];
+    }
+
+    public double rawCloseAt(int dateIdx, int symbolIdx) {
+        return rawCloses[dateIdx][symbolIdx];
+    }
+
+    public double adjustmentFactorAt(int dateIdx, int symbolIdx) {
+        return adjustmentFactors[dateIdx][symbolIdx];
+    }
+
+    public boolean validBarAt(int dateIdx, int symbolIdx) {
+        return validBars[dateIdx][symbolIdx];
+    }
+
+    public boolean hasSourceBarAt(int dateIdx, int symbolIdx) {
+        return sourceBars[dateIdx][symbolIdx];
     }
 
     public int eligibilityAt(int dateIdx, int symbolIdx) {

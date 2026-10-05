@@ -16,6 +16,7 @@ public final class CommonConfig {
     private final String marketSector;
     private final String outputDir;
     private final String outputPrefix;
+    private final String dataValidationMode;
     private final boolean verbose;
     private final boolean portalEnabled;
 
@@ -29,8 +30,12 @@ public final class CommonConfig {
         marketSector = value(properties, "market.sector", "");
         outputDir = value(properties, "output.dir", "output/rotation");
         outputPrefix = value(properties, "output.prefix", "rotation");
+        dataValidationMode = value(properties, "data.validation.mode", "warn").toLowerCase(java.util.Locale.ROOT);
         verbose = bool(properties, "verbose", true);
         portalEnabled = bool(properties, "portal.enabled", true);
+        if (!dataValidationMode.equals("warn") && !dataValidationMode.equals("fail")) {
+            throw new IllegalArgumentException("data.validation.mode must be 'warn' or 'fail'.");
+        }
     }
 
     public Path projectRoot() { return projectRoot; }
@@ -42,6 +47,7 @@ public final class CommonConfig {
     public String marketSector() { return marketSector.isBlank() ? null : marketSector; }
     public String outputDir() { return outputDir; }
     public String outputPrefix() { return outputPrefix; }
+    public String dataValidationMode() { return dataValidationMode; }
     public boolean verbose() { return verbose; }
     public boolean portalEnabled() { return portalEnabled; }
 

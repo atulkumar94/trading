@@ -11,7 +11,7 @@ import java.util.Locale;
 
 import com.rotation.config.RotationConfig;
 import com.rotation.data.DailyBarLoader;
-import com.rotation.data.MinuteHistoryDailyBarLoader;
+import com.rotation.data.DailyFileBarLoader;
 import com.rotation.data.SectorSymbolsReader;
 import com.rotation.data.SnapshotDailyBarLoader;
 import com.rotation.engine.RotationEngine;
@@ -35,7 +35,7 @@ public final class BacktestPipeline {
         if (!Files.isDirectory(dataDir)) {
             throw new IllegalArgumentException("Input data path does not exist: " + dataDir);
         }
-        DailyBarLoader loader = new MinuteHistoryDailyBarLoader();
+        DailyBarLoader loader = new DailyFileBarLoader();
         if (!dailyRefresh) {
             System.out.printf(Locale.US, "Loading data from %s ...%n", dataDir);
         }
@@ -76,6 +76,7 @@ public final class BacktestPipeline {
             }
         }
 
+        MarketDataValidator.validate(bars, config.dataValidationMode());
         validateBars(bars);
 
         Path outputDir = config.resolveOutputDir();

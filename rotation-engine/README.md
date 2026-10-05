@@ -67,9 +67,10 @@ The most important setting here is the input path:
 
 That folder contains historical daily stock CSV files.
 
-### 2) Data loading
+### 2) Data loading and validation
 
-The loader reads each stock file and turns it into daily OHLCV records.
+`DailyFileBarLoader` reads each daily file and turns it into daily bars. The old
+`MinuteHistoryDailyBarLoader` class remains as a thin compatibility adapter.
 
 Each symbol file is normalized into a dataset with fields such as:
 
@@ -79,8 +80,20 @@ Each symbol file is normalized into a dataset with fields such as:
 - low
 - close
 - volume
+- raw close, adjustment factor, and a valid-bar flag
 
-This is done in the classes under the data package and then converted into a single daily matrix using the bar model.
+The adjusted OHLC prices retain the existing `Adj Close / Close` transformation.
+`BacktestPipeline` validates the filtered bars before exporting the snapshot. Set
+`data.validation.mode=warn` (default) to report findings without changing bars, or
+`fail` to stop before export. The checks cover missing/invalid bars, valid close jumps
+over 50%, and runs of at least three valid OHLC bars identical to their predecessor.
+The checked-in input currently reports 506 missing/invalid symbol-sessions, 6 large
+jumps, and 4 repeated-bar runs; warn mode does not filter these observations.
+
+The daily snapshot preserves its original first eight columns and appends `volume`,
+`raw_close`, `adjustment_factor`, and `valid_bar`. `SnapshotDailyBarLoader` reads both
+the extended format and older snapshots; absent legacy metadata defaults to unavailable
+volume, raw close equal to adjusted close, factor 1, and valid=true.
 
 ### Point-in-time market access and indicators
 
@@ -511,7 +524,8 @@ This will:
 - `report/BacktestReportBuilder.java` — legacy rebalance, equity, holdings and year-end row projections
 - `strategy/Strategy.java` + `MomentumRotationStrategy.java` + `RotationStrategies.java` — close-time intents and diagnostics
 - `strategy/ExitPolicy.java` + `StopLossExitPolicy.java` — optional, strategy-supplied intra-period exit rule
-- `MinuteHistoryDailyBarLoader.java` — loads external daily/history CSVs
+- `DailyFileBarLoader.java` — loads daily files and retains raw-bar metadata
+- `MinuteHistoryDailyBarLoader.java` — thin legacy adapter
 - `CsvExporter.java` — writes CSV reports
 - `report/DailyValuationBuilder.java` / `ReportReconciler.java` / `PerformanceCalculator.java` — daily accounting, reconciliation, range metrics
 - `DailyReportExporter.java` / `RunManifestBuilder.java` / `PortalExporter.java` — daily CSVs, run manifest, HTML portal

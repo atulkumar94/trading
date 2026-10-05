@@ -41,7 +41,9 @@ public final class MarketSnapshotExporter {
                 double high = bars.highAt(d, i);
                 double low = bars.lowAt(d, i);
                 double close = bars.closeAt(d, i);
-                if (Double.isNaN(open) || Double.isNaN(high) || Double.isNaN(low) || Double.isNaN(close)) {
+                boolean missingPrice = Double.isNaN(open) || Double.isNaN(high)
+                        || Double.isNaN(low) || Double.isNaN(close);
+                if (missingPrice && (!bars.hasSourceBarAt(d, i) || bars.validBarAt(d, i))) {
                     continue;
                 }
 
@@ -52,9 +54,12 @@ public final class MarketSnapshotExporter {
                 if (Double.isNaN(prevClose) || prevClose == 0.0) {
                     prevClose = close;
                 }
-                double returnPct = ((close / prevClose) - 1.0) * 100.0;
+                double returnPct = Double.isNaN(close) || Double.isNaN(prevClose) || prevClose == 0.0
+                    ? Double.NaN : ((close / prevClose) - 1.0) * 100.0;
 
-                rows.add(new MarketSnapshotRow(date, symbol, prevClose, open, high, low, close, returnPct));
+                rows.add(new MarketSnapshotRow(date, symbol, prevClose, open, high, low, close, returnPct,
+                    bars.volumeAt(d, i), bars.rawCloseAt(d, i),
+                    bars.adjustmentFactorAt(d, i), bars.validBarAt(d, i)));
             }
         }
 
@@ -63,7 +68,8 @@ public final class MarketSnapshotExporter {
 
     private void writeDailyMarketSnapshot(List<MarketSnapshotRow> rows, Path path) {
         try (Writer w = Files.newBufferedWriter(path)) {
-            w.write("date,symbol,prev_close,open,high,low,close,return_vs_prev_close\n");
+                w.write("date,symbol,prev_close,open,high,low,close,return_vs_prev_close,"
+                    + "volume,raw_close,adjustment_factor,valid_bar\n");
             for (MarketSnapshotRow row : rows) {
                 w.write(String.join(",",
                         row.date.toString(),
@@ -73,7 +79,11 @@ public final class MarketSnapshotExporter {
                         price(row.high),
                         price(row.low),
                         price(row.close),
-                        num(row.returnVsPrevClose)));
+                        num(row.returnVsPrevClose),
+                        optionalNumber(row.volume),
+                        optionalNumber(row.rawClose),
+                        optionalNumber(row.adjustmentFactor),
+                        Boolean.toString(row.validBar)));
                 w.write("\n");
             }
         } catch (IOException e) {
@@ -82,11 +92,15 @@ public final class MarketSnapshotExporter {
     }
 
     private static String num(double value) {
-        return String.format(Locale.US, "%.2f", value);
+        return Double.isFinite(value) ? String.format(Locale.US, "%.2f", value) : "";
     }
 
     /** Full-precision price so the snapshot losslessly stores the DailyBars data. */
     private static String price(double value) {
         return Double.isNaN(value) ? "" : Double.toString(value);
+    }
+
+    private static String optionalNumber(double value) {
+        return Double.isFinite(value) ? Double.toString(value) : "";
     }
 }

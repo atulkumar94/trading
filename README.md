@@ -8,7 +8,7 @@ End-to-end pipeline: download NSE daily OHLCV data, normalize it into market sna
 symbols.csv
     ↓  download_nse_data.py (yfinance)
 stocks/daily/{SYMBOL}.csv
-    ↓  BacktestPipeline: MinuteHistoryDailyBarLoader → DailyBars → validate/filter
+    ↓  BacktestPipeline: DailyFileBarLoader → DailyBars → validate/filter
 (end.date / symbols.file / market.sector) — full history kept for lookback warm-up
     ↓  MarketSnapshotExporter
 rotation_daily_market_snapshot.csv   ← single source of truth
@@ -112,6 +112,12 @@ Unprefixed historical momentum keys remain accepted with a deprecation warning. 
 legacy key and its `momentum.*` form are set, the namespaced value wins. Unknown keys fail
 with a closest-match suggestion.
 
+The daily market snapshot keeps its existing first eight columns and appends `volume`,
+`raw_close`, `adjustment_factor`, and `valid_bar`. Older snapshots without the appended
+metadata remain readable. `data.validation.mode=warn` (default) reports invalid/missing bars,
+valid close jumps over 50%, and runs of at least three identical valid OHLC bars without
+changing prices; `fail` stops before exporting the snapshot.
+
 ## Outputs
 
 All in `rotation-engine/output/rotation/` with prefix `rotation`:
@@ -210,7 +216,7 @@ year-end marks vs. `_yearly.csv`, rebalance-open marks vs. `_rebalances.csv`, th
 in the manifest and the Run details view.
 
 **Limitations:**
-- No volume: the daily snapshot the engine trades on has no volume column.
+- Volume is retained in the daily snapshot; the portal does not currently chart it.
 - Prices are embedded rounded to 0.01 (0.001 / 0.0001 for symbols trading below 10 / 1), for display only. Valuations come from the engine at full precision.
 - Forward-filled bars in the source data can't be told apart from real ones. Bars identical to the prior session are flagged as possibly stale.
 - A held position with no close is valued at zero (engine convention) and flagged.

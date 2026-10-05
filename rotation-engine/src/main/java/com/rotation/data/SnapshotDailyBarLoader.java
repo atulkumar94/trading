@@ -36,24 +36,34 @@ public final class SnapshotDailyBarLoader {
             if (header == null) {
                 throw new IllegalArgumentException("Daily market snapshot is empty: " + snapshotFile);
             }
+            Map<String, Integer> columns = columns(header);
             String line;
             while ((line = reader.readLine()) != null) {
                 if (line.isBlank()) {
                     continue;
                 }
-                String[] parts = line.split(",");
+                String[] parts = line.split(",", -1);
                 if (parts.length < 7) {
                     continue;
                 }
                 try {
-                    LocalDate date = LocalDate.parse(parts[0].trim());
-                    String symbol = parts[1].trim();
-                    double open = Double.parseDouble(parts[3].trim());
-                    double high = Double.parseDouble(parts[4].trim());
-                    double low = Double.parseDouble(parts[5].trim());
-                    double close = Double.parseDouble(parts[6].trim());
+                    LocalDate date = LocalDate.parse(parts[column(columns, "date", 0)].trim());
+                    String symbol = parts[column(columns, "symbol", 1)].trim();
+                    boolean validBar = optionalBoolean(parts, columns, "valid_bar", true);
+                    double open = optionalDouble(parts, columns, "open", 3, Double.NaN);
+                    double high = optionalDouble(parts, columns, "high", 4, Double.NaN);
+                    double low = optionalDouble(parts, columns, "low", 5, Double.NaN);
+                    double close = optionalDouble(parts, columns, "close", 6, Double.NaN);
+                    double volume = optionalDouble(parts, columns, "volume", Double.NaN);
+                    double rawClose = optionalDouble(parts, columns, "raw_close", close);
+                    double adjustmentFactor = optionalDouble(parts, columns, "adjustment_factor", 1.0);
+                    if (validBar && (Double.isNaN(open) || Double.isNaN(high)
+                            || Double.isNaN(low) || Double.isNaN(close))) {
+                        continue;
+                    }
                     bySymbol.computeIfAbsent(symbol, ignored -> new ArrayList<>())
-                            .add(new DailyCandle(date, open, high, low, close, 0.0));
+                            .add(new DailyCandle(date, open, high, low, close, volume,
+                                    rawClose, adjustmentFactor, validBar));
                 } catch (RuntimeException ignored) {
                     // skip malformed rows
                 }
@@ -72,5 +82,50 @@ public final class SnapshotDailyBarLoader {
             throw new IllegalArgumentException("No usable rows found in daily market snapshot: " + snapshotFile);
         }
         return series;
+    }
+
+    private static Map<String, Integer> columns(String header) {
+        Map<String, Integer> result = new LinkedHashMap<>();
+        String[] names = header.split(",", -1);
+        for (int index = 0; index < names.length; index++) {
+            result.put(names[index].trim().toLowerCase(java.util.Locale.ROOT), index);
+        }
+        return result;
+    }
+
+    private static int column(Map<String, Integer> columns, String name, int fallback) {
+        return columns.getOrDefault(name, fallback);
+    }
+
+    private static double optionalDouble(String[] parts, Map<String, Integer> columns,
+                                         String name, double fallback) {
+        return optionalDouble(parts, columns, name, columns.getOrDefault(name, -1), fallback);
+    }
+
+    private static double optionalDouble(String[] parts, Map<String, Integer> columns,
+                                         String name, int fallbackIndex, double fallback) {
+        Integer index = columns.get(name);
+        if (index == null && fallbackIndex >= 0) {
+            index = fallbackIndex;
+        }
+        if (index == null) {
+            return fallback;
+        }
+        if (index >= parts.length || parts[index].isBlank()) {
+            return Double.NaN;
+        }
+        return Double.parseDouble(parts[index].trim());
+    }
+
+    private static boolean optionalBoolean(String[] parts, Map<String, Integer> columns,
+                                           String name, boolean fallback) {
+        Integer index = columns.get(name);
+        if (index == null) {
+            return fallback;
+        }
+        if (index >= parts.length || parts[index].isBlank()) {
+            return false;
+        }
+        return Boolean.parseBoolean(parts[index].trim());
     }
 }
