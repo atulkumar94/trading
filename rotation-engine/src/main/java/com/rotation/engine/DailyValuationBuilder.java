@@ -6,7 +6,8 @@ import com.rotation.model.DailyMark;
 import com.rotation.model.DailyPortfolioRow;
 import com.rotation.model.DailyPositionRow;
 import com.rotation.model.DailyValuation;
-import com.rotation.model.LedgerFill;
+import com.rotation.portfolio.Fill;
+import com.rotation.portfolio.Position;
 import com.rotation.model.TradeLedgerRow;
 
 import java.time.LocalDate;
@@ -57,7 +58,7 @@ public final class DailyValuationBuilder {
         List<TradeLedgerRow> ledgerRows = new ArrayList<>();
 
         Map<String, Position> book = new LinkedHashMap<>();
-        List<LedgerFill> fills = result.fills();
+        List<Fill> fills = result.ledger().fills();
         int nextFill = 0;
         double cash = initialCapital;
         double realizedCumulative = 0.0;
@@ -76,7 +77,7 @@ public final class DailyValuationBuilder {
             cumulativeContributions += mark.contribution;
 
             while (nextFill < fills.size() && !fills.get(nextFill).date.isAfter(mark.date)) {
-                LedgerFill fill = fills.get(nextFill++);
+                Fill fill = fills.get(nextFill++);
                 if (fill.date.isBefore(mark.date)) {
                     throw new IllegalStateException("Fill on " + fill.date + " precedes the session being valued ("
                             + mark.date + "); fills must be dated on trading sessions in order");
@@ -87,45 +88,43 @@ public final class DailyValuationBuilder {
                 double value = fill.quantity * fill.price;
                 if (fill.isBuy()) {
                     if (position == null) {
-                        if (!fill.action.equals(LedgerFill.ENTRY)) {
+                        if (!fill.action.equals(Fill.ENTRY)) {
                             throw new IllegalStateException(fill.action + " for " + fill.symbol + " on "
                                     + fill.date + " without an open position");
                         }
                         position = new Position(fill.date, fill.price);
                         book.put(fill.symbol, position);
-                    } else if (fill.action.equals(LedgerFill.ENTRY)) {
+                    } else if (fill.action.equals(Fill.ENTRY)) {
                         throw new IllegalStateException("ENTRY for already-held " + fill.symbol + " on " + fill.date);
                     }
-                    position.quantity += fill.quantity;
-                    position.cost += value;
+                    position.add(fill.quantity, fill.price);
                     cash -= value;
                 } else {
-                    if (position == null || fill.quantity > position.quantity + QTY_TOLERANCE) {
+                    if (position == null || fill.quantity > position.quantity() + QTY_TOLERANCE) {
                         throw new IllegalStateException(fill.action + " of " + fill.quantity + " " + fill.symbol
                                 + " on " + fill.date + " exceeds the held quantity");
                     }
                     realized = (fill.price - avgBefore) * fill.quantity;
                     realizedCumulative += realized;
-                    position.cost -= avgBefore * fill.quantity;
-                    position.quantity -= fill.quantity;
+                    position.remove(fill.quantity, avgBefore);
                     cash += value;
-                    boolean closes = !fill.action.equals(LedgerFill.TRIM);
-                    if (closes && Math.abs(position.quantity) > QTY_TOLERANCE) {
+                    boolean closes = !fill.action.equals(Fill.TRIM);
+                    if (closes && Math.abs(position.quantity()) > QTY_TOLERANCE) {
                         throw new IllegalStateException(fill.action + " for " + fill.symbol + " on " + fill.date
-                                + " left " + position.quantity + " shares open");
+                                + " left " + position.quantity() + " shares open");
                     }
                 }
-                double positionAfter = position.quantity;
+                double positionAfter = position.quantity();
                 double avgAfter = positionAfter > QTY_TOLERANCE ? position.averageCost() : 0.0;
-                Double pnlVsEntry = fill.action.equals(LedgerFill.EXIT) || fill.action.equals(LedgerFill.STOP)
-                        ? (fill.price - position.entryPrice) * fill.quantity
+                Double pnlVsEntry = fill.action.equals(Fill.EXIT) || fill.action.equals(Fill.STOP)
+                        ? (fill.price - position.entryPrice()) * fill.quantity
                         : null;
                 ledgerRows.add(new TradeLedgerRow(fill.date, fill.signalDate, fill.rebalanceNumber, fill.action,
-                        fill.symbol, fill.quantity, fill.price, value, position.entryDate, position.entryPrice,
+                        fill.symbol, fill.quantity, fill.price, value, position.entryDate(), position.entryPrice(),
                         avgBefore, avgAfter, positionAfter, realized, pnlVsEntry, cash, fill.reason));
                 // Only closing actions remove a name: the engine can hold a zero-share
                 // position (whole-lot sizing below one share) and keeps it in its book.
-                if (!fill.isBuy() && !fill.action.equals(LedgerFill.TRIM)) {
+                if (!fill.isBuy() && !fill.action.equals(Fill.TRIM)) {
                     book.remove(fill.symbol);
                 }
             }
@@ -152,21 +151,21 @@ public final class DailyValuationBuilder {
                 } else {
                     status = unchangedBar(bars, dayIdx, col) ? DailyPositionRow.PRICE_UNCHANGED
                             : DailyPositionRow.PRICE_OK;
-                    marketValue = position.quantity * close;
+                    marketValue = position.quantity() * close;
                 }
                 invested += marketValue;
-                unrealized += marketValue - position.cost;
+                unrealized += marketValue - position.cost();
                 pending.add(new PendingPosition(symbol, position, Double.isNaN(close) ? null : close,
                         marketValue, status));
             }
 
             double equity = mark.accountEquity;
             for (PendingPosition p : pending) {
-                double upnl = p.marketValue - p.position.cost;
+                double upnl = p.marketValue - p.position.cost();
                 positionRows.add(new DailyPositionRow(mark.date, p.symbol, sectorBySymbol.get(p.symbol),
-                        p.position.entryDate, mark.rebalanceNumber, p.position.quantity, p.position.entryPrice,
-                        p.position.averageCost(), p.position.cost, p.close, p.marketValue, upnl,
-                        p.position.cost == 0.0 ? 0.0 : upnl / p.position.cost * 100.0,
+                    p.position.entryDate(), mark.rebalanceNumber, p.position.quantity(), p.position.entryPrice(),
+                    p.position.averageCost(), p.position.cost(), p.close, p.marketValue, upnl,
+                    p.position.cost() == 0.0 ? 0.0 : upnl / p.position.cost() * 100.0,
                         equity == 0.0 ? 0.0 : p.marketValue / equity * 100.0, p.status));
             }
 
@@ -189,7 +188,7 @@ public final class DailyValuationBuilder {
         }
 
         if (nextFill < fills.size()) {
-            LedgerFill orphan = fills.get(nextFill);
+            Fill orphan = fills.get(nextFill);
             throw new IllegalStateException("Fill on " + orphan.date + " (" + orphan.action + " " + orphan.symbol
                     + ") falls after the last valued session");
         }
@@ -202,7 +201,7 @@ public final class DailyValuationBuilder {
                     + ": engine " + mark.holdings.keySet() + " vs ledger " + book.keySet());
         }
         for (Map.Entry<String, Double> entry : mark.holdings.entrySet()) {
-            double ledgerQty = book.get(entry.getKey()).quantity;
+            double ledgerQty = book.get(entry.getKey()).quantity();
             if (Math.abs(ledgerQty - entry.getValue()) > QTY_TOLERANCE) {
                 throw new IllegalStateException("Ledger quantity for " + entry.getKey() + " on " + mark.date
                         + " is " + ledgerQty + " but the engine holds " + entry.getValue());
@@ -219,23 +218,6 @@ public final class DailyValuationBuilder {
                 && bars.highAt(dayIdx, col) == bars.highAt(dayIdx - 1, col)
                 && bars.lowAt(dayIdx, col) == bars.lowAt(dayIdx - 1, col)
                 && bars.closeAt(dayIdx, col) == bars.closeAt(dayIdx - 1, col);
-    }
-
-    /** Mutable replay state for one open position (internal to the builder). */
-    private static final class Position {
-        final LocalDate entryDate;
-        final double entryPrice;
-        double quantity;
-        double cost;
-
-        Position(LocalDate entryDate, double entryPrice) {
-            this.entryDate = entryDate;
-            this.entryPrice = entryPrice;
-        }
-
-        double averageCost() {
-            return quantity > QTY_TOLERANCE ? cost / quantity : 0.0;
-        }
     }
 
     private static final class PendingPosition {

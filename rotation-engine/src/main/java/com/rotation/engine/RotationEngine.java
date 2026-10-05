@@ -8,7 +8,6 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.TreeSet;
 
@@ -17,20 +16,26 @@ import com.rotation.model.BacktestResult;
 import com.rotation.model.DailyBars;
 import com.rotation.model.DailyMark;
 import com.rotation.model.EntryDetail;
-import com.rotation.model.EquityRow;
 import com.rotation.model.ExitDetail;
-import com.rotation.model.HoldingsRow;
-import com.rotation.model.LedgerFill;
 import com.rotation.model.LookbackRow;
 import com.rotation.model.PerformanceRow;
-import com.rotation.model.RebalanceRecord;
 import com.rotation.model.TradebookRow;
 import com.rotation.model.YearEndEquity;
+import com.rotation.portfolio.FinalPortfolioMark;
+import com.rotation.portfolio.Ledger;
+import com.rotation.portfolio.Portfolio;
+import com.rotation.portfolio.RebalanceEvent;
+import com.rotation.execution.ExecutionModel;
+import com.rotation.execution.ExecutionResult;
+import com.rotation.execution.PendingRebalance;
+import com.rotation.execution.StopExecutionResult;
 import com.rotation.report.RebalanceLogger;
+import com.rotation.report.BacktestReportBuilder;
+import com.rotation.report.BacktestReports;
 import com.rotation.strategy.Candidate;
-import com.rotation.strategy.ExitPolicy;
 import com.rotation.strategy.RotationStrategies;
 import com.rotation.strategy.RotationStrategy;
+import com.rotation.execution.BacktestExecution;
 
 /**
  * Fixed-schedule top-N momentum rotation engine.
@@ -46,7 +51,8 @@ public final class RotationEngine {
     private final RotationConfig config;
     private final RebalanceLogger logger = new RebalanceLogger();
     private final RotationStrategy strategy;
-    private final ExitPolicy exitPolicy;
+    private final BacktestExecution execution;
+    private final ExecutionModel executionModel;
 
     public RotationEngine(RotationConfig config) {
         this(config, RotationStrategies.create(config));
@@ -56,7 +62,8 @@ public final class RotationEngine {
     public RotationEngine(RotationConfig config, RotationStrategy strategy) {
         this.config = config;
         this.strategy = strategy;
-        this.exitPolicy = strategy.exitPolicy();
+        this.execution = new BacktestExecution(strategy.exitPolicy());
+        this.executionModel = execution;
     }
 
     public BacktestResult run(DailyBars bars) {
@@ -95,27 +102,17 @@ public final class RotationEngine {
                     rebalancePoints.size());
         }
 
-        List<RebalanceRecord> records = new ArrayList<>();
-        List<EquityRow> equityRows = new ArrayList<>();
         List<PerformanceRow> performanceRows = new ArrayList<>();
-        List<TradebookRow> tradebookRows = new ArrayList<>();
-        List<HoldingsRow> holdingsRows = new ArrayList<>();
+        Ledger ledger = new Ledger();
+        List<TradebookRow> tradebookRows = ledger.executionTradebookRows();
         // Post-rebalance portfolio state captured for each period so any calendar
         // date can later be marked to market by replaying stops onto a clone.
         List<PeriodSnapshot> periodSnapshots = new ArrayList<>();
         // Every position change (incl. held-name re-weights) and the end-of-day book,
         // so the daily valuation report can replay the run without re-deriving it.
-        List<LedgerFill> fills = new ArrayList<>();
-        List<DailyMark> dailyMarks = new ArrayList<>();
-
-        Map<String, Double> holdings = new LinkedHashMap<>(); // symbol -> quantity
-        Map<String, Double> entryPrices = new LinkedHashMap<>();
-        Map<String, Double> stopBasis = new LinkedHashMap<>();  // symbol -> period entry price (stop reference)
-        Map<String, Double> peakPrices = new LinkedHashMap<>();  // symbol -> highest price since period entry
+        Portfolio portfolio = new Portfolio(initialCapital, ledger);
+        Map<String, Double> holdings = portfolio.quantities();
         int currentHoldingsRebalanceNumber = 0; // rebalance that established the current holdings
-        double accountEquity = initialCapital;
-        double deployedCapital = 0.0;
-        double cash = 0.0; // undeployed cash carried between rebalances (e.g. whole-lot remainder)
         double cumulativeGrowth = 1.0; // compounded product of per-period holding returns
         LocalDate previousRebalanceDate = null;
         int previousExecutionIdx = -1;
@@ -137,7 +134,7 @@ public final class RotationEngine {
             int executionIdx = day;
             LocalDate signalDate = dates.get(signalIdx);
             LocalDate executionDate = dates.get(executionIdx);
-            double cashBeforeRebalance = cash; // remainder + stop proceeds accrued this period
+            double cashBeforeRebalance = portfolio.cash(); // remainder + stop proceeds accrued this period
 
             // Add a fixed monthly cash top-up on the first rebalance of each new
             // calendar month (SIP-style). The cash is credited to account equity
@@ -154,7 +151,7 @@ public final class RotationEngine {
             }
             lastContributionMonth = executionMonth;
             contributionToday = contribution;
-            int rebalanceNumber = records.size() + 1;
+            int rebalanceNumber = ledger.rebalances().size() + 1;
 
             // --- 1. Value the book that survived intra-period stops at the execution
             //        (next) open. Stops were already applied day-by-day by the daily
@@ -167,39 +164,26 @@ public final class RotationEngine {
             double periodPnl;
             double periodReturnPct;
             if (investedAtPeriodStart == 0.0 && holdings.isEmpty()) {
-                portfolioValueBefore = accountEquity + cash;
+                portfolioValueBefore = portfolio.accountEquity() + portfolio.cash();
                 periodPnl = 0.0;
                 periodReturnPct = 0.0;
             } else {
-                Map<String, Double> valued = new LinkedHashMap<>();
-                double value = 0.0;
-                for (Map.Entry<String, Double> entry : holdings.entrySet()) {
-                    double price = openAt(bars, executionIdx, entry.getKey());
-                    if (Double.isNaN(price)) {
-                        // no execution price -> position drops out (its value is lost)
-                        fills.add(new LedgerFill(executionDate, signalDate, rebalanceNumber, LedgerFill.DROP,
-                                entry.getKey(), entry.getValue(), 0.0,
-                                "No open price on execution day; position written off at zero"));
-                        continue;
-                    }
-                    valued.put(entry.getKey(), entry.getValue());
-                    value += entry.getValue() * price;
-                }
-                holdings = valued;
+                double value = execution.valueAndDropAtOpen(executionDate, signalDate,
+                        rebalanceNumber, executionIdx, bars, portfolio, ledger);
                 // Total period P&L = unrealized move on surviving holdings plus any
                 // realized gain/loss booked by intra-period stops. Carried cash (incl.
                 // stop proceeds) is added back so it is re-deployed next period.
-                periodPnl = (value - deployedCapital) + realizedStopPnl;
-                portfolioValueBefore = value + cash;
+                periodPnl = (value - portfolio.deployedCapital()) + realizedStopPnl;
+                portfolioValueBefore = value + portfolio.cash();
                 periodReturnPct = investedAtPeriodStart == 0.0
                         ? 0.0
                         : (periodPnl / investedAtPeriodStart) * 100.0;
-                accountEquity += periodPnl;
+                portfolio.setAccountEquity(portfolio.accountEquity() + periodPnl);
             }
-            cash = 0.0; // consumed into portfolioValueBefore / target capital below
+            portfolio.setCash(0.0); // consumed into portfolioValueBefore / target capital below
 
             // Credit this month's contribution as fresh cash on this rebalance.
-            accountEquity += contribution;
+            portfolio.setAccountEquity(portfolio.accountEquity() + contribution);
 
             // --- 2. Rank the eligible universe and pick the book. Always enter the
             //        top-N; when exit.n > top.n, retain currently-held names until they
@@ -246,39 +230,18 @@ public final class RotationEngine {
             Map<String, Double> priorHoldings = new LinkedHashMap<>(holdings);
 
             // --- 4. Build exit details before reassigning holdings. ---
-            List<ExitDetail> exitDetails = new ArrayList<>();
-            for (String symbol : exited) {
-                double exitPrice = openAt(bars, executionIdx, symbol);
-                Double qtyObj = priorHoldings.get(symbol);
-                if (Double.isNaN(exitPrice) || qtyObj == null || qtyObj.isNaN()) {
-                    continue;
-                }
-                double qty = qtyObj;
-                Double entryPrice = entryPrices.get(symbol);
-                double exitValue = qty * exitPrice;
-                double realizedPnl = entryPrice != null ? (exitPrice - entryPrice) * qty : 0.0;
-                exitDetails.add(new ExitDetail(symbol, entryPrice, exitPrice, qty, exitValue, realizedPnl));
-            }
+            List<ExitDetail> exitDetails = execution.exitDetailsAtOpen(
+                    executionIdx, bars, exited, priorHoldings, portfolio);
 
             // --- 5. Allocate capital to the selected symbols at the next open. ---
-            List<EntryDetail> entryDetails = new ArrayList<>();
             double portfolioValueAfter;
             boolean cameFromCash = priorHoldings.isEmpty();
             double targetCapital = 0.0;
             double pendingUsed = 0.0;
             if (!selected.isEmpty()) {
-                Map<String, Double> selectedPrices = new LinkedHashMap<>();
-                for (String symbol : selected) {
-                    double price = openAt(bars, executionIdx, symbol);
-                    if (!Double.isNaN(price)) {
-                        selectedPrices.put(symbol, price);
-                    }
-                }
+                Map<String, Double> selectedPrices = execution.selectedOpenPrices(selected, executionIdx, bars);
                 if (selectedPrices.isEmpty()) {
-                    holdings = new LinkedHashMap<>();
-                    stopBasis.clear();
-                    peakPrices.clear();
-                    deployedCapital = 0.0;
+                    execution.allocateAtOpen(selectedPrices, 0.0, 0.0, portfolio);
                     portfolioValueAfter = 0.0;
                 } else {
                     // Positions are sized against the full book capacity (exit.n slots),
@@ -295,7 +258,7 @@ public final class RotationEngine {
                         // accrued contributions already folded into accountEquity), not a
                         // phantom capitalPerStock * N that would conjure capital from nowhere.
                         pendingUsed = pendingContribution;
-                        targetCapital = accountEquity;
+                        targetCapital = portfolio.accountEquity();
                         pendingContribution = 0.0;
                         portfolioValueBefore = targetCapital;
                         allocation = targetCapital / exitN;
@@ -305,136 +268,49 @@ public final class RotationEngine {
                         pendingContribution = 0.0;
                         allocation = targetCapital / exitN;
                     }
-                    Map<String, Double> newHoldings = new LinkedHashMap<>();
-                    double deployed = 0.0;
-                    for (Map.Entry<String, Double> entry : selectedPrices.entrySet()) {
-                        double qty = floorToLot(allocation / entry.getValue());
-                        newHoldings.put(entry.getKey(), qty);
-                        deployed += qty * entry.getValue();
-                    }
-                    holdings = newHoldings;
-                    // Reset the stop reference and trailing peak to this period's entry
-                    // price for every held name (cost basis is re-struck each rebalance).
-                    stopBasis.clear();
-                    peakPrices.clear();
-                    for (Map.Entry<String, Double> entry : selectedPrices.entrySet()) {
-                        stopBasis.put(entry.getKey(), entry.getValue());
-                        peakPrices.put(entry.getKey(), entry.getValue());
-                    }
-                    deployedCapital = deployed;
-                    // Keep the undeployed whole-lot remainder as cash for next period.
-                    cash = targetCapital - deployed;
-                    portfolioValueAfter = deployed;
+                    portfolioValueAfter = execution.allocateAtOpen(
+                            selectedPrices, allocation, targetCapital, portfolio);
                 }
             } else {
-                holdings = new LinkedHashMap<>();
-                stopBasis.clear();
-                peakPrices.clear();
-                deployedCapital = 0.0;
+                execution.allocateAtOpen(Map.of(), 0.0, 0.0, portfolio);
                 portfolioValueAfter = 0.0;
             }
 
-            for (String symbol : exited) {
-                entryPrices.remove(symbol);
-            }
-
-            // --- 5b. Emit trades on a cash ledger: close positions before opening new. ---
-            double runningCash = cameFromCash ? targetCapital : cashBeforeRebalance + pendingUsed;
-            // (1) EXITs credit their proceeds to cash.
-            for (ExitDetail detail : exitDetails) {
-                double before = runningCash;
-                runningCash += detail.exitValue;
-                tradebookRows.add(new TradebookRow(executionDate, "EXIT", detail.symbol,
-                        detail.quantity, detail.exitPrice, detail.exitValue, detail.entryPrice,
-                        detail.exitPrice, detail.realizedPnl, round2(before), round2(runningCash),
-                        signalDate, rebalanceNumber));
-                fills.add(new LedgerFill(executionDate, signalDate, rebalanceNumber, LedgerFill.EXIT,
-                        detail.symbol, detail.quantity, detail.exitPrice,
-                        exitReason(rankBySymbol.get(detail.symbol), ranked.size(), exitN)));
-            }
-            // (2) Re-weight held positions (no separate row): net cash impact only.
-            double heldNetValue = 0.0;
-            for (String symbol : held) {
-                double price = openAt(bars, executionIdx, symbol);
-                if (Double.isNaN(price)) {
-                    continue;
-                }
-                Double oldQty = priorHoldings.get(symbol);
-                Double newQty = holdings.get(symbol);
-                heldNetValue += (newQty != null ? newQty : 0.0) * price;
-                heldNetValue -= (oldQty != null ? oldQty : 0.0) * price;
-                double delta = (newQty != null ? newQty : 0.0) - (oldQty != null ? oldQty : 0.0);
-                if (delta != 0.0) {
-                    Integer rank = rankBySymbol.get(symbol);
-                    fills.add(new LedgerFill(executionDate, signalDate, rebalanceNumber,
-                            delta > 0 ? LedgerFill.ADD : LedgerFill.TRIM, symbol, Math.abs(delta), price,
-                            "Re-sized to target allocation (rank " + rank + " of " + ranked.size()
-                                    + (topNSelection.contains(symbol) ? ", in top.n selection)"
-                                            : ", retained in exit buffer)")));
-                }
-            }
-            runningCash -= heldNetValue;
-            // (3) ENTRYs debit their cost from cash.
-            for (String symbol : entered) {
-                Double newQty = holdings.get(symbol);
-                double price = openAt(bars, executionIdx, symbol);
-                if (newQty == null || Double.isNaN(price)) {
-                    continue;
-                }
-                double tradeValue = newQty * price;
-                double before = runningCash;
-                runningCash -= tradeValue;
-                entryDetails.add(new EntryDetail(symbol, price, newQty, tradeValue));
-                tradebookRows.add(new TradebookRow(executionDate, "ENTRY", symbol, newQty, price,
-                        tradeValue, price, null, null, round2(before), round2(runningCash),
-                        signalDate, rebalanceNumber));
-                fills.add(new LedgerFill(executionDate, signalDate, rebalanceNumber, LedgerFill.ENTRY,
-                        symbol, newQty, price,
-                        "Entered: rank " + rankBySymbol.get(symbol) + " of " + ranked.size() + " (top.n=" + topN
-                                + (rankBySymbol.get(symbol) > topN ? ", higher-ranked names skipped by sector cap)" : ")")));
-                entryPrices.put(symbol, price);
-            }
+                PendingRebalance pending = new PendingRebalance(signalDate, executionIdx, rebalanceNumber,
+                    entered, exited, held, priorHoldings, new LinkedHashMap<>(holdings), exitDetails, ranked,
+                    rankBySymbol, topNSelection, targetCapital, cashBeforeRebalance, pendingUsed,
+                    cameFromCash, topN, exitN);
+                ExecutionResult executionResult = executionModel.executeAtOpen(
+                    executionDate, pending, portfolio, bars);
+                List<EntryDetail> entryDetails = executionResult.entries();
 
             // --- 6. Record and log. ---
             double capPerStock = selected.isEmpty() ? 0.0 : portfolioValueAfter / selected.size();
-            records.add(new RebalanceRecord(executionDate, signalDate, round2(portfolioValueBefore),
-                    round2(portfolioValueAfter), round2(accountEquity), round2(periodPnl), selected.size(),
-                    round2(capPerStock), String.join(",", entered), String.join(",", exited),
-                    String.join(",", held), round2(periodReturnPct)));
-            equityRows.add(new EquityRow(executionDate, signalDate, round2(portfolioValueAfter),
-                    round2(accountEquity), round2(periodPnl), round2(capPerStock), String.join(",", selected),
-                    lookbackStart, previousRebalanceDate, round2(contribution)));
-
-            periodSnapshots.add(new PeriodSnapshot(executionIdx, accountEquity, deployedCapital, cash,
-                    new LinkedHashMap<>(holdings), new LinkedHashMap<>(stopBasis),
-                    new LinkedHashMap<>(peakPrices), new LinkedHashMap<>(entryPrices), rebalanceNumber));
+                periodSnapshots.add(new PeriodSnapshot(executionIdx, portfolio.copy()));
 
             // --- 6b. Portfolio snapshot for the holdings sheet. ---
             cumulativeGrowth *= (1.0 + periodReturnPct / 100.0);
-            StringBuilder holdingsStr = new StringBuilder();
-            for (Map.Entry<String, Double> h : holdings.entrySet()) {
-                if (holdingsStr.length() > 0) {
-                    holdingsStr.append('|');
-                }
-                holdingsStr.append(h.getKey()).append(':').append(String.format(Locale.US, "%.2f", h.getValue()));
-            }
-            double portfolioValue = deployedCapital + cash;
+            double portfolioValue = portfolio.deployedCapital() + portfolio.cash();
             double cumulativeReturnPct = (cumulativeGrowth - 1.0) * 100.0;
-            holdingsRows.add(new HoldingsRow(executionDate, signalDate, rebalanceNumber, holdings.size(),
-                    holdingsStr.toString(), round2(deployedCapital), round2(cash), round2(portfolioValue),
-                    round2(accountEquity), round2(periodReturnPct), round2(cumulativeReturnPct)));
+            ledger.recordRebalance(new RebalanceEvent(executionDate, signalDate, lookbackStart,
+                    previousRebalanceDate, selected, String.join(",", entered),
+                    String.join(",", exited), String.join(",", held), selected.size(),
+                    portfolioValueBefore, portfolioValueAfter, portfolio.accountEquity(), periodPnl,
+                    capPerStock, periodReturnPct, contribution, holdings,
+                    portfolio.deployedCapital(), portfolio.cash(), portfolioValue, cumulativeReturnPct));
 
             if (verbose) {
                 int sessionsSincePrevious = previousExecutionIdx < 0 ? 0 : executionIdx - previousExecutionIdx;
                 logger.logRebalance(rebalanceNumber, signalDate, executionDate, lookbackStart, lookbackDays,
                         previousRebalanceDate, sessionsSincePrevious, performanceTable, entered, exited, held,
-                        portfolioValueBefore, periodPnl, periodReturnPct, portfolioValueAfter, accountEquity,
+                        portfolioValueBefore, periodPnl, periodReturnPct, portfolioValueAfter, portfolio.accountEquity(),
                         contribution, entryDetails, exitDetails);
             }
             previousRebalanceDate = executionDate;
             previousExecutionIdx = executionIdx;
             currentHoldingsRebalanceNumber = rebalanceNumber;
-            periodInvestedAtStart = deployedCapital;
+            portfolio.setRebalanceNumber(rebalanceNumber);
+            periodInvestedAtStart = portfolio.deployedCapital();
             periodRealizedStopPnl = 0.0;
             }
 
@@ -449,17 +325,15 @@ public final class RotationEngine {
                     markValue += h.getValue() * close;
                 }
             }
-            dailyMarks.add(new DailyMark(dates.get(day),
-                    accountEquity + (markValue - deployedCapital) + periodRealizedStopPnl,
+                ledger.recordMark(new DailyMark(dates.get(day),
+                    portfolio.accountEquity() + (markValue - portfolio.deployedCapital()) + periodRealizedStopPnl,
                     contributionToday, currentHoldingsRebalanceNumber, holdings));
 
             // Daily stop-loss / trailing-stop check on the current book: a breach on
             // this day's close exits at the next session's open, on any calendar day.
             if (!holdings.isEmpty()) {
-                StopResult sr = applyStops(bars, day, day, dates, holdings, stopBasis, peakPrices,
-                        entryPrices, currentHoldingsRebalanceNumber, cash, tradebookRows, fills);
-                cash = sr.cash;
-                deployedCapital -= sr.basisRemoved;
+                StopExecutionResult sr = executionModel.checkProtectiveStops(dates.get(day), portfolio, bars);
+                portfolio.setDeployedCapital(portfolio.deployedCapital() - sr.basisRemoved);
                 periodRealizedStopPnl += sr.realizedPnl;
             }
         }
@@ -474,47 +348,34 @@ public final class RotationEngine {
             double investedAtLastPeriodStart = periodInvestedAtStart;
             double lastRealizedStopPnl = periodRealizedStopPnl;
             double currentValue = 0.0;
-            StringBuilder markStr = new StringBuilder();
             for (Map.Entry<String, Double> h : holdings.entrySet()) {
                 double close = closeAt(bars, lastIdx, h.getKey());
                 if (Double.isNaN(close)) {
                     continue;
                 }
                 currentValue += h.getValue() * close;
-                if (markStr.length() > 0) {
-                    markStr.append('|');
-                }
-                markStr.append(h.getKey()).append(':').append(String.format(Locale.US, "%.2f", h.getValue()));
             }
-            double markPeriodPnl = (currentValue - deployedCapital) + lastRealizedStopPnl;
+            double markPeriodPnl = (currentValue - portfolio.deployedCapital()) + lastRealizedStopPnl;
             double markPeriodReturnPct = investedAtLastPeriodStart == 0.0
                     ? 0.0
                     : (markPeriodPnl / investedAtLastPeriodStart) * 100.0;
-            double markEquity = accountEquity + markPeriodPnl;
+            double markEquity = portfolio.accountEquity() + markPeriodPnl;
             double markCumulativeReturnPct =
                     (cumulativeGrowth * (1.0 + markPeriodReturnPct / 100.0) - 1.0) * 100.0;
-            holdingsRows.add(new HoldingsRow(markDate, markDate, records.size(), holdings.size(),
-                    markStr.toString(), round2(currentValue), round2(cash), round2(currentValue + cash),
-                    round2(markEquity), round2(markPeriodReturnPct), round2(markCumulativeReturnPct)));
+            ledger.recordFinalMark(new FinalPortfolioMark(markDate, ledger.rebalances().size(),
+                    holdings, currentValue, portfolio.cash(), currentValue + portfolio.cash(),
+                    markEquity, markPeriodReturnPct, markCumulativeReturnPct));
         }
 
         List<YearEndEquity> yearEndMarks = buildYearEndMarks(bars, dates, tradeStartIdx, periodSnapshots,
                 initialCapital);
+        yearEndMarks.forEach(ledger::recordYearEndMark);
 
         List<LookbackRow> lookbackRows = buildLookbackRows(bars, lookbackDays, minHistory, topN);
-        return new BacktestResult(records, equityRows, performanceRows, tradebookRows, lookbackRows,
-                holdingsRows, yearEndMarks, initialCapital, fills, dailyMarks);
-    }
-
-    private static String exitReason(Integer rank, int rankedCount, int exitN) {
-        if (rank == null) {
-            return "Ineligible at signal (missing close or insufficient history)";
-        }
-        if (rank > exitN) {
-            return "Rank " + rank + " of " + rankedCount + ", below exit rank " + exitN;
-        }
-        return "Rank " + rank + " of " + rankedCount + ", within exit rank " + exitN
-                + " but not reselected (sector cap or book capacity)";
+        BacktestReports reports = new BacktestReportBuilder().build(ledger);
+        return new BacktestResult(reports.rebalances(), reports.equityRows(), performanceRows,
+                tradebookRows, lookbackRows, reports.holdingsRows(), reports.yearEndMarks(),
+                initialCapital, ledger);
     }
 
     /**
@@ -549,32 +410,27 @@ public final class RotationEngine {
             }
             double equity = active == null
                     ? initialCapital // year end before the first investment
-                    : markToMarket(bars, dates, active, yearEndIdx);
+                    : markToMarket(bars, active, yearEndIdx);
             marks.add(new YearEndEquity(year, dates.get(yearEndIdx), round2(equity)));
         }
         return marks;
     }
 
     /** Account equity if the given period's holdings are valued at {@code targetIdx}'s close. */
-    private double markToMarket(DailyBars bars, List<LocalDate> dates, PeriodSnapshot snapshot, int targetIdx) {
-        if (snapshot.holdings.isEmpty()) {
-            return snapshot.accountEquity; // cash period: equity is fully tracked already
+    private double markToMarket(DailyBars bars, PeriodSnapshot snapshot, int targetIdx) {
+        Portfolio replay = snapshot.portfolio.copy();
+        if (replay.positions().isEmpty()) {
+            return replay.accountEquity(); // cash period: equity is fully tracked already
         }
-        Map<String, Double> holdings = new LinkedHashMap<>(snapshot.holdings);
-        Map<String, Double> stopBasis = new LinkedHashMap<>(snapshot.stopBasis);
-        Map<String, Double> peakPrices = new LinkedHashMap<>(snapshot.peakPrices);
-        Map<String, Double> entryPrices = new LinkedHashMap<>(snapshot.entryPrices);
-        double deployedCapital = snapshot.deployedCapital;
         // Replay stops triggered by closes BEFORE the target session only: those fill at
         // or before the target open. A stop triggered by the target close fills at the
         // next open, so the position is still held (and valued) at the target close;
         // replaying it here would book a future open price into this mark.
-        StopResult sr = applyStops(bars, snapshot.executionIdx, targetIdx - 1, dates, holdings, stopBasis,
-                peakPrices, entryPrices, snapshot.rebalanceNumber, snapshot.cash, new ArrayList<>(),
-                new ArrayList<>());
-        deployedCapital -= sr.basisRemoved;
+        StopExecutionResult sr = execution.replayProtectiveStops(
+            snapshot.executionIdx, targetIdx - 1, replay, bars);
+        double deployedCapital = replay.deployedCapital() - sr.basisRemoved;
         double value = 0.0;
-        for (Map.Entry<String, Double> h : holdings.entrySet()) {
+        for (Map.Entry<String, Double> h : replay.quantities().entrySet()) {
             double close = closeAt(bars, targetIdx, h.getKey());
             if (Double.isNaN(close)) {
                 continue;
@@ -582,7 +438,7 @@ public final class RotationEngine {
             value += h.getValue() * close;
         }
         double markPeriodPnl = (value - deployedCapital) + sr.realizedPnl;
-        return snapshot.accountEquity + markPeriodPnl;
+        return replay.accountEquity() + markPeriodPnl;
     }
 
     /**
@@ -626,87 +482,6 @@ public final class RotationEngine {
         return rows;
     }
 
-    /**
-     * Apply the strategy's {@link ExitPolicy} to the current holdings for each trading
-     * day in {@code [fromIdx, toIdxInclusive]}. A position is flagged the first day its
-     * <em>close</em> breaches the policy's stop level and is then sold at the <em>next</em>
-     * session's open (never same-day), so the rule reacts to confirmed end-of-day weakness
-     * rather than intraday noise. Proceeds are credited to cash and a {@code STOP} tradebook
-     * row emitted. The passed maps are mutated in place; the returned {@link StopResult}
-     * carries the updated cash, the realized P&L (measured from the period entry basis) and
-     * the cost basis removed from {@code deployedCapital}.
-     */
-    private StopResult applyStops(DailyBars bars, int fromIdx, int toIdxInclusive, List<LocalDate> dates,
-                                  Map<String, Double> holdings, Map<String, Double> stopBasis,
-                                  Map<String, Double> peakPrices, Map<String, Double> entryPrices,
-                                  int owningRebalanceNumber, double startingCash,
-                                  List<TradebookRow> tradebookRows, List<LedgerFill> fills) {
-        StopResult result = new StopResult();
-        result.cash = startingCash;
-        if (!exitPolicy.active() || holdings.isEmpty()) {
-            return result;
-        }
-        List<String> symbols = bars.symbols();
-        int lastIdx = dates.size() - 1;
-        for (int d = fromIdx; d <= toIdxInclusive; d++) {
-            if (holdings.isEmpty()) {
-                break;
-            }
-            int fillIdx = d + 1;
-            boolean canFill = fillIdx <= lastIdx; // need a next session to exit at its open
-            for (String symbol : new ArrayList<>(holdings.keySet())) {
-                int col = symbols.indexOf(symbol);
-                if (col < 0) {
-                    continue;
-                }
-                double basis = stopBasis.getOrDefault(symbol, entryPrices.getOrDefault(symbol, Double.NaN));
-                if (Double.isNaN(basis)) {
-                    continue;
-                }
-                // Trailing peak tracks the highest CLOSE through the prior session; the
-                // stop is evaluated against today's close, so nothing exits on its own bar.
-                double peak = peakPrices.getOrDefault(symbol, basis);
-                double close = bars.closeAt(d, col);
-                ExitPolicy.Trigger trigger = exitPolicy.evaluate(basis, peak, close);
-                double fillOpen = canFill ? bars.openAt(fillIdx, col) : Double.NaN;
-                if (trigger == null || !canFill || Double.isNaN(fillOpen)) {
-                    if (!Double.isNaN(close) && close > peak) {
-                        peakPrices.put(symbol, close); // roll the peak forward on today's close
-                    }
-                    continue;
-                }
-                double qty = holdings.get(symbol);
-                double proceeds = qty * fillOpen;
-                double before = result.cash;
-                result.cash += proceeds;
-                result.basisRemoved += qty * basis;
-                result.realizedPnl += proceeds - qty * basis;
-                Double entry = entryPrices.get(symbol);
-                double reportedPnl = entry != null ? (fillOpen - entry) * qty : 0.0;
-                tradebookRows.add(new TradebookRow(dates.get(fillIdx), "STOP", symbol, qty, fillOpen,
-                        round2(proceeds), entry, fillOpen, round2(reportedPnl), round2(before),
-                        round2(result.cash), dates.get(d), owningRebalanceNumber));
-                fills.add(new LedgerFill(dates.get(fillIdx), dates.get(d), owningRebalanceNumber,
-                        LedgerFill.STOP, symbol, qty, fillOpen,
-                        String.format(Locale.US, "%s: close %.2f <= stop %.2f on %s; filled next open",
-                                trigger.rule, close, trigger.stopLevel, dates.get(d))));
-                holdings.remove(symbol);
-                stopBasis.remove(symbol);
-                peakPrices.remove(symbol);
-                entryPrices.remove(symbol);
-            }
-        }
-        return result;
-    }
-
-    private static double openAt(DailyBars bars, int dateIdx, String symbol) {
-        int idx = bars.symbols().indexOf(symbol);
-        if (idx < 0) {
-            return Double.NaN;
-        }
-        return bars.openAt(dateIdx, idx);
-    }
-
     private static double closeAt(DailyBars bars, int dateIdx, String symbol) {
         int idx = bars.symbols().indexOf(symbol);
         if (idx < 0) {
@@ -719,42 +494,14 @@ public final class RotationEngine {
         return Math.round(value * 100.0) / 100.0;
     }
 
-    /** Round a tradable quantity down to the nearest whole share (e.g. 65.5 -> 65). */
-    private static double floorToLot(double quantity) {
-        return Math.floor(quantity);
-    }
-
-    /** Mutable outcome of an intra-period stop scan over one holding window. */
-    private static final class StopResult {
-        double cash;          // running cash after crediting stop proceeds
-        double realizedPnl;   // realized P&L booked by stops (from period entry basis)
-        double basisRemoved;  // cost basis removed from deployedCapital
-    }
-
     /** Immutable post-rebalance portfolio state used to mark the book at any later date. */
     private static final class PeriodSnapshot {
         final int executionIdx;
-        final double accountEquity;
-        final double deployedCapital;
-        final double cash;
-        final Map<String, Double> holdings;
-        final Map<String, Double> stopBasis;
-        final Map<String, Double> peakPrices;
-        final Map<String, Double> entryPrices;
-        final int rebalanceNumber;
+        final Portfolio portfolio;
 
-        PeriodSnapshot(int executionIdx, double accountEquity, double deployedCapital, double cash,
-                       Map<String, Double> holdings, Map<String, Double> stopBasis,
-                       Map<String, Double> peakPrices, Map<String, Double> entryPrices, int rebalanceNumber) {
+        PeriodSnapshot(int executionIdx, Portfolio portfolio) {
             this.executionIdx = executionIdx;
-            this.accountEquity = accountEquity;
-            this.deployedCapital = deployedCapital;
-            this.cash = cash;
-            this.holdings = holdings;
-            this.stopBasis = stopBasis;
-            this.peakPrices = peakPrices;
-            this.entryPrices = entryPrices;
-            this.rebalanceNumber = rebalanceNumber;
+            this.portfolio = portfolio;
         }
     }
 }

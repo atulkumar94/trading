@@ -389,12 +389,17 @@ This contains the latest 30 trading-day lookback rankings using the current run 
 
 `DailyReportJob` runs after the CSV exports in both modes:
 
-- `RotationEngine` records every fill (`LedgerFill`: ENTRY, ADD/TRIM re-weights, EXIT, STOP, DROP)
-  and an end-of-day `DailyMark` per session (book after that session's open executions, engine
-  mark-to-market equity at its close).
-- `DailyValuationBuilder` replays the fills on an independent cash ledger with average-cost accounting
-  and writes `rotation_daily_portfolio.csv`, `rotation_daily_positions.csv` and `rotation_trade_ledger.csv`.
-  If the replayed book diverges from the engine's book on any day, it throws.
+- `RotationEngine` coordinates the existing day loop and strategy decisions. It sends a pending
+  rebalance to `ExecutionModel`; `BacktestExecution` owns next-open prices, whole-share sizing,
+  position changes, cash effects, and protective-stop fills.
+- `Portfolio` owns ordered `Position` state and account balances. `Ledger` records `Fill` events,
+  end-of-day `DailyMark` snapshots, and immutable rebalance/final-mark events.
+- `BacktestReportBuilder` projects the ledger's rebalance, equity, holdings and year-end events into
+  the established report row models. `DailyReportJob` and the CSV exporters keep the output names and
+  column order unchanged.
+- `DailyValuationBuilder` replays ledger fills into a fresh book with independent average-cost
+  accounting and writes `rotation_daily_portfolio.csv`, `rotation_daily_positions.csv` and
+  `rotation_trade_ledger.csv`. If that replay diverges from the engine's daily marks, it throws.
 - `ReportReconciler` checks the new reports against `rotation_rebalances.csv`, `rotation_holdings.csv`,
   `rotation_yearly.csv` and `rotation_tradebook.csv`. A failed check stops the run after the files are
   written, so they can be inspected.
@@ -488,7 +493,10 @@ This will:
 
 - `Main.java` — entry point
 - `RotationConfig.java` — loads all settings
-- `RotationEngine.java` — core backtesting logic (next-open execution, accounting, running the exit policy, reports)
+- `RotationEngine.java` — daily driver and strategy coordination
+- `execution/ExecutionModel.java` + `BacktestExecution.java` — next-open fill and protective-stop mechanics
+- `portfolio/Portfolio.java` + `Position.java` + `Ledger.java` + `Fill.java` — account state and ordered events
+- `report/BacktestReportBuilder.java` — legacy rebalance, equity, holdings and year-end row projections
 - `strategy/RotationStrategy.java` + `MomentumRotationStrategy.java` + `RotationStrategies.java` — the pluggable signal layer (schedule + rank + pick the book)
 - `strategy/ExitPolicy.java` + `StopLossExitPolicy.java` — optional, strategy-supplied intra-period exit rule
 - `MinuteHistoryDailyBarLoader.java` — loads external daily/history CSVs

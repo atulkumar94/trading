@@ -41,11 +41,13 @@ stocksData/
         │   ├── Main.java              ← Entry point / orchestration
         │   ├── config/                ← RotationConfig
         │   ├── data/                  ← Loaders (MinuteHistory, Snapshot)
-        │   ├── engine/                ← RotationEngine
+        │   ├── engine/                ← RotationEngine day loop and strategy coordination
+        │   ├── execution/             ← ExecutionModel and BacktestExecution
+        │   ├── portfolio/             ← Portfolio, Position, Ledger, Fill
         │   ├── strategy/              ← Pluggable selection (RotationStrategy, MomentumRotationStrategy)
         │   ├── job/                   ← DailyRefreshJob
         │   ├── model/                 ← Immutable data models (DailyBars, …)
-        │   └── report/                ← CSV exporters
+        │   └── report/                ← Ledger report projections and CSV exporters
         └── test/java/com/rotation/    ← Unit tests
 ```
 

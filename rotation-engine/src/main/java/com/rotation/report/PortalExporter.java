@@ -6,7 +6,7 @@ import com.rotation.model.DailyPortfolioRow;
 import com.rotation.model.DailyPositionRow;
 import com.rotation.model.DailyValuation;
 import com.rotation.model.EquityRow;
-import com.rotation.model.LedgerFill;
+import com.rotation.portfolio.Fill;
 import com.rotation.model.LookbackRow;
 import com.rotation.model.PerformanceRow;
 import com.rotation.model.RebalanceRecord;
@@ -42,8 +42,8 @@ import java.util.function.ToLongFunction;
 public final class PortalExporter {
 
     private static final String RESOURCE_ROOT = "/portal/";
-    static final List<String> ACTIONS = List.of(LedgerFill.ENTRY, LedgerFill.ADD, LedgerFill.TRIM,
-            LedgerFill.EXIT, LedgerFill.STOP, LedgerFill.DROP);
+        static final List<String> ACTIONS = List.of(Fill.ENTRY, Fill.ADD, Fill.TRIM,
+            Fill.EXIT, Fill.STOP, Fill.DROP);
     static final List<String> PRICE_STATUSES = List.of(DailyPositionRow.PRICE_OK,
             DailyPositionRow.PRICE_MISSING, DailyPositionRow.PRICE_UNCHANGED);
 

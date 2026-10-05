@@ -38,6 +38,7 @@ class RotationEngineTest {
         TradebookRow firstTrade = result.tradebookRows().get(0);
         assertEquals("ENTRY", firstTrade.action);
         assertEquals(startDate, firstTrade.tradeDate);
+        assertTrue(firstTrade.tradeDate.isAfter(firstTrade.signalDate));
         for (TradebookRow row : result.tradebookRows()) {
             assertFalse(row.tradeDate.isBefore(startDate), "trade before start date: " + row.tradeDate);
         }
@@ -62,6 +63,7 @@ class RotationEngineTest {
         TradebookRow firstEntry = result.tradebookRows().get(0);
         assertEquals("ENTRY", firstEntry.action);
         assertEquals(firstRebalance, firstEntry.tradeDate);
+        assertTrue(firstEntry.tradeDate.isAfter(firstEntry.signalDate));
     }
 
     @Test

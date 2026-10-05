@@ -2,7 +2,7 @@ package com.rotation.model;
 
 import java.time.LocalDate;
 
-/** A {@link LedgerFill} with its cash and average-cost accounting applied. */
+/** A {@link com.rotation.portfolio.Fill} with its cash and average-cost accounting applied. */
 public final class TradeLedgerRow {
 
     public final LocalDate date;
