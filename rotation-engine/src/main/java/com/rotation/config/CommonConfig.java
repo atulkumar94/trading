@@ -2,6 +2,8 @@ package com.rotation.config;
 
 import java.nio.file.Path;
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Properties;
 
 /** Configuration shared by market ingestion, reporting, and every strategy. */
@@ -19,6 +21,7 @@ public final class CommonConfig {
     private final String dataValidationMode;
     private final boolean verbose;
     private final boolean portalEnabled;
+    private final List<Integer> dmaPeriods;
 
     CommonConfig(Path projectRoot, Properties properties) {
         this.projectRoot = projectRoot;
@@ -33,6 +36,7 @@ public final class CommonConfig {
         dataValidationMode = value(properties, "data.validation.mode", "warn").toLowerCase(java.util.Locale.ROOT);
         verbose = bool(properties, "verbose", true);
         portalEnabled = bool(properties, "portal.enabled", true);
+        dmaPeriods = periods(properties, "market.dma.periods", "10,20,50,100,200");
         if (!dataValidationMode.equals("warn") && !dataValidationMode.equals("fail")) {
             throw new IllegalArgumentException("data.validation.mode must be 'warn' or 'fail'.");
         }
@@ -50,6 +54,9 @@ public final class CommonConfig {
     public String dataValidationMode() { return dataValidationMode; }
     public boolean verbose() { return verbose; }
     public boolean portalEnabled() { return portalEnabled; }
+
+    /** Moving-average periods stored with the daily prices; empty when disabled. */
+    public List<Integer> dmaPeriods() { return dmaPeriods; }
 
     public Path resolveDataDir() {
         return dataPath.isBlank() ? projectRoot.resolve("data") : absolute(Path.of(dataPath));
@@ -79,6 +86,27 @@ public final class CommonConfig {
     private static LocalDate date(Properties properties, String key) {
         String value = value(properties, key, "");
         return value.isBlank() ? null : LocalDate.parse(value);
+    }
+
+    private static List<Integer> periods(Properties properties, String key, String fallback) {
+        List<Integer> periods = new ArrayList<>();
+        String value = value(properties, key, fallback);
+        if (value.isBlank()) {
+            return periods;
+        }
+        for (String part : value.split(",")) {
+            int period;
+            try {
+                period = Integer.parseInt(part.trim());
+            } catch (NumberFormatException e) {
+                throw new IllegalArgumentException(key + " must be comma-separated positive integers: " + value);
+            }
+            if (period <= 0 || periods.contains(period)) {
+                throw new IllegalArgumentException(key + " must be distinct positive integers: " + value);
+            }
+            periods.add(period);
+        }
+        return List.copyOf(periods);
     }
 
     private static boolean bool(Properties properties, String key, boolean fallback) {

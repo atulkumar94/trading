@@ -16,10 +16,13 @@ public final class MarketSnapshotRow {
     public final double rawClose;
     public final double adjustmentFactor;
     public final boolean validBar;
+    /** Moving averages in the order of the exported DMA periods. */
+    public final double[] dmas;
 
     public MarketSnapshotRow(LocalDate date, String symbol, double prevClose, double open, double high,
                             double low, double close, double returnVsPrevClose, double volume,
-                            double rawClose, double adjustmentFactor, boolean validBar) {
+                            double rawClose, double adjustmentFactor, boolean validBar,
+                            double[] dmas) {
         this.date = date;
         this.symbol = symbol;
         this.prevClose = prevClose;
@@ -32,5 +35,6 @@ public final class MarketSnapshotRow {
         this.rawClose = rawClose;
         this.adjustmentFactor = adjustmentFactor;
         this.validBar = validBar;
+        this.dmas = dmas.clone();
     }
 }

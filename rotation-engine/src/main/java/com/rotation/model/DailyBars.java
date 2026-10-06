@@ -2,6 +2,7 @@ package com.rotation.model;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -15,8 +16,15 @@ import java.util.TreeSet;
  * {@code eligibility} matrix holds the cumulative count of non-null closes for
  * each symbol up to and including each date, which drives the minimum-history
  * gate in the engine.
+ *
+ * <p>For every configured period the bars also carry a simple moving average of the
+ * adjusted close (DMA). A DMA is defined on a session only when the symbol has
+ * {@code period} consecutive non-NaN closes ending on it, so a gap restarts the window.
  */
 public final class DailyBars {
+
+    /** Default DMA periods stored alongside the prices. */
+    public static final List<Integer> DEFAULT_DMA_PERIODS = List.of(10, 20, 50, 100, 200);
 
     private final List<LocalDate> dates;
     private final List<String> symbols;
@@ -32,11 +40,14 @@ public final class DailyBars {
     private final boolean[][] sourceBars; // source row exists, even when its prices are invalid
     private final boolean[][] validBars; // [dateIdx][symbolIdx], false for absent/invalid source bars
     private final int[][] eligibility; // [dateIdx][symbolIdx]
+    private final List<Integer> dmaPeriods;
+    private final double[][][] dmas; // [periodIdx][dateIdx][symbolIdx], adjusted-close SMA
 
     private DailyBars(List<LocalDate> dates, List<String> symbols, Map<String, Integer> symbolIndex,
                       double[][] opens, double[][] highs, double[][] lows, double[][] closes,
                       double[][] volumes, double[][] rawCloses, double[][] adjustmentFactors,
-                      boolean[][] sourceBars, boolean[][] validBars, int[][] eligibility) {
+                      boolean[][] sourceBars, boolean[][] validBars, int[][] eligibility,
+                      List<Integer> dmaPeriods, double[][][] dmas) {
         this.dates = List.copyOf(dates);
         this.symbols = List.copyOf(symbols);
         Map<LocalDate, Integer> dateIndex = new HashMap<>();
@@ -55,6 +66,8 @@ public final class DailyBars {
         this.sourceBars = sourceBars;
         this.validBars = validBars;
         this.eligibility = eligibility;
+        this.dmaPeriods = List.copyOf(dmaPeriods);
+        this.dmas = dmas;
     }
 
     /**
@@ -66,6 +79,13 @@ public final class DailyBars {
      *                    tick input is left with genuine NaN gaps.
      */
     public static DailyBars build(List<SymbolDailyCandles> seriesList, boolean forwardFill) {
+        return build(seriesList, forwardFill, DEFAULT_DMA_PERIODS);
+    }
+
+    /** As {@link #build(List, boolean)} with explicit DMA periods (positive, distinct; may be empty). */
+    public static DailyBars build(List<SymbolDailyCandles> seriesList, boolean forwardFill,
+                                  List<Integer> dmaPeriods) {
+        dmaPeriods = validatedPeriods(dmaPeriods);
         TreeSet<LocalDate> dateSet = new TreeSet<>();
         TreeSet<String> symbolSet = new TreeSet<>();
         for (SymbolDailyCandles series : seriesList) {
@@ -165,8 +185,60 @@ public final class DailyBars {
             }
         }
 
+        double[][][] dmas = new double[dmaPeriods.size()][][];
+        for (int p = 0; p < dmas.length; p++) {
+            dmas[p] = movingAverage(closes, dmaPeriods.get(p));
+        }
+
         return new DailyBars(dates, symbols, symbolIndex, opens, highs, lows, closes,
-            volumes, rawCloses, adjustmentFactors, sourceBars, validBars, eligibility);
+            volumes, rawCloses, adjustmentFactors, sourceBars, validBars, eligibility, dmaPeriods, dmas);
+    }
+
+    private static List<Integer> validatedPeriods(List<Integer> periods) {
+        if (periods == null) {
+            throw new IllegalArgumentException("DMA periods must not be null.");
+        }
+        List<Integer> copy = List.copyOf(periods);
+        for (int i = 0; i < copy.size(); i++) {
+            if (copy.get(i) <= 0) {
+                throw new IllegalArgumentException("DMA periods must be positive: " + copy);
+            }
+            if (copy.indexOf(copy.get(i)) != i) {
+                throw new IllegalArgumentException("DMA periods must be distinct: " + copy);
+            }
+        }
+        return copy;
+    }
+
+    /** Trailing simple average per column; NaN until {@code period} consecutive values exist. */
+    private static double[][] movingAverage(double[][] values, int period) {
+        int rows = values.length;
+        int cols = rows == 0 ? 0 : values[0].length;
+        double[][] result = new double[rows][cols];
+        for (double[] row : result) {
+            Arrays.fill(row, Double.NaN);
+        }
+        for (int j = 0; j < cols; j++) {
+            double sum = 0.0;
+            int run = 0;
+            for (int i = 0; i < rows; i++) {
+                double value = values[i][j];
+                if (Double.isNaN(value)) {
+                    sum = 0.0;
+                    run = 0;
+                    continue;
+                }
+                sum += value;
+                run++;
+                if (run > period) {
+                    sum -= values[i - period][j];
+                }
+                if (run >= period) {
+                    result[i][j] = sum / period;
+                }
+            }
+        }
+        return result;
     }
 
     private static void forwardFill(double[][] matrix) {
@@ -210,7 +282,7 @@ public final class DailyBars {
         if (rebuilt.isEmpty()) {
             throw new IllegalArgumentException("None of the requested symbols are present in the data source.");
         }
-        return build(rebuilt, false);
+        return build(rebuilt, false, dmaPeriods);
     }
 
     public DailyBars filterFrom(LocalDate startDate) {
@@ -240,10 +312,14 @@ public final class DailyBars {
         boolean[][] sourceBars = new boolean[rows][cols];
         boolean[][] validBars = new boolean[rows][cols];
         int[][] eligibility = new int[rows][cols];
+        double[][][] dmas = new double[dmaPeriods.size()][rows][cols];
 
         for (int i = 0; i < rows; i++) {
             for (int j = 0; j < cols; j++) {
                 int sourceIdx = startIdx + i;
+                for (int p = 0; p < dmas.length; p++) {
+                    dmas[p][i][j] = this.dmas[p][sourceIdx][j];
+                }
                 opens[i][j] = this.opens[sourceIdx][j];
                 highs[i][j] = this.highs[sourceIdx][j];
                 lows[i][j] = this.lows[sourceIdx][j];
@@ -258,7 +334,8 @@ public final class DailyBars {
         }
 
         return new DailyBars(filteredDates, symbols, symbolIndex,
-            opens, highs, lows, closes, volumes, rawCloses, adjustmentFactors, sourceBars, validBars, eligibility);
+            opens, highs, lows, closes, volumes, rawCloses, adjustmentFactors, sourceBars, validBars, eligibility,
+            dmaPeriods, dmas);
     }
 
     public DailyBars filterTo(LocalDate endDate) {
@@ -287,9 +364,13 @@ public final class DailyBars {
         boolean[][] sourceBars = new boolean[rows][cols];
         boolean[][] validBars = new boolean[rows][cols];
         int[][] eligibility = new int[rows][cols];
+        double[][][] dmas = new double[dmaPeriods.size()][rows][cols];
 
         for (int i = 0; i < rows; i++) {
             for (int j = 0; j < cols; j++) {
+                for (int p = 0; p < dmas.length; p++) {
+                    dmas[p][i][j] = this.dmas[p][i][j];
+                }
                 opens[i][j] = this.opens[i][j];
                 highs[i][j] = this.highs[i][j];
                 lows[i][j] = this.lows[i][j];
@@ -304,7 +385,8 @@ public final class DailyBars {
         }
 
         return new DailyBars(filteredDates, symbols, symbolIndex,
-            opens, highs, lows, closes, volumes, rawCloses, adjustmentFactors, sourceBars, validBars, eligibility);
+            opens, highs, lows, closes, volumes, rawCloses, adjustmentFactors, sourceBars, validBars, eligibility,
+            dmaPeriods, dmas);
     }
 
     /** Ascending trading dates; unmodifiable. */
@@ -375,5 +457,23 @@ public final class DailyBars {
 
     public int eligibilityAt(int dateIdx, int symbolIdx) {
         return eligibility[dateIdx][symbolIdx];
+    }
+
+    /** Configured DMA periods in configuration order; unmodifiable. */
+    public List<Integer> dmaPeriods() {
+        return dmaPeriods;
+    }
+
+    public boolean hasDma(int period) {
+        return dmaPeriods.contains(period);
+    }
+
+    /** Adjusted-close simple moving average ending on the session; NaN while the window is incomplete. */
+    public double dmaAt(int period, int dateIdx, int symbolIdx) {
+        int periodIdx = dmaPeriods.indexOf(period);
+        if (periodIdx < 0) {
+            throw new IllegalArgumentException("DMA period " + period + " is not configured: " + dmaPeriods);
+        }
+        return dmas[periodIdx][dateIdx][symbolIdx];
     }
 }

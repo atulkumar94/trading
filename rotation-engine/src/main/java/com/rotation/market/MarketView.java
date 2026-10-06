@@ -70,7 +70,29 @@ public final class MarketView {
     }
 
     public double sma(String symbol, int period) {
+        if (bars.hasDma(period)) {
+            return dma(symbol, period);
+        }
         return indicatorProvider.cache().sma(this, symbol, period);
+    }
+
+    /** Adjusted-close moving average for a configured {@code market.dma.periods} value. */
+    public double dma(String symbol, int period) {
+        return dma(symbol, period, 0);
+    }
+
+    /** DMA as of {@code back} sessions ago; NaN while the window is incomplete or the symbol is unknown. */
+    public double dma(String symbol, int period, int back) {
+        int index = indexFor(back);
+        int symbolIndex = symbolIndex(symbol);
+        if (!bars.hasDma(period)) {
+            throw new IllegalArgumentException(
+                    "DMA period " + period + " is not configured: " + bars.dmaPeriods());
+        }
+        if (index < 0 || symbolIndex < 0) {
+            return Double.NaN;
+        }
+        return bars.dmaAt(period, index, symbolIndex);
     }
 
     public double atr(String symbol, int period) {

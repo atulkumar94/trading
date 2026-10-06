@@ -40,7 +40,7 @@ public final class BacktestPipeline {
             System.out.printf(Locale.US, "Loading data from %s ...%n", dataDir);
         }
         List<SymbolDailyCandles> series = loader.load(dataDir);
-        DailyBars bars = DailyBars.build(series, loader.forwardFill());
+        DailyBars bars = DailyBars.build(series, loader.forwardFill(), config.dmaPeriods());
 
         if (!dailyRefresh && config.startDate() != null) {
             System.out.printf(Locale.US,
@@ -85,7 +85,7 @@ public final class BacktestPipeline {
 
         // Both reports and the runner consume the same materialized daily snapshot.
         Path snapshot = outputDir.resolve(prefix + "_daily_market_snapshot.csv");
-        DailyBars snapshotBars = DailyBars.build(SnapshotDailyBarLoader.load(snapshot), false);
+        DailyBars snapshotBars = DailyBars.build(SnapshotDailyBarLoader.load(snapshot), false, config.dmaPeriods());
         new MonthlyMarketSnapshotExporter().export(snapshotBars, outputDir, prefix);
 
         BacktestResult result = new RotationEngine(config).run(snapshotBars);

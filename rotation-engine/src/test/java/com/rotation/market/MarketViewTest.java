@@ -32,6 +32,32 @@ class MarketViewTest {
         assertTrue(highError.getMessage().contains("future sessions"));
     }
 
+    @Test
+    void dmaReadsStoredAverageAsOfPastSessionsWithoutLookahead() {
+        MarketView view = new MarketData(DailyBars.build(rows(), false, List.of(3))).asOf(5);
+
+        assertEquals(14.0, view.dma("AAA", 3), 1e-9);
+        assertEquals(13.0, view.dma("AAA", 3, 1), 1e-9);
+        assertTrue(Double.isNaN(view.dma("AAA", 3, 4)));
+        assertTrue(Double.isNaN(view.dma("AAA", 3, 99)));
+        assertTrue(Double.isNaN(view.dma("ZZZ", 3)));
+        assertEquals(view.dma("AAA", 3), view.sma("AAA", 3), 1e-12);
+        assertEquals(14.5, view.sma("AAA", 2), 1e-9); // unconfigured period falls back to the indicator cache
+        assertThrows(IllegalArgumentException.class, () -> view.dma("AAA", 3, -1));
+        assertThrows(IllegalArgumentException.class, () -> view.dma("AAA", 7));
+    }
+
+    private static List<SymbolDailyCandles> rows() {
+        List<DailyCandle> candles = new ArrayList<>();
+        LocalDate date = LocalDate.of(2024, 1, 2);
+        for (int i = 0; i < 6; i++) {
+            double close = 10.0 + i;
+            candles.add(new DailyCandle(date.plusDays(i), close, close + 1.0,
+                    close - 1.0, close, 1.0));
+        }
+        return List.of(new SymbolDailyCandles("AAA", candles));
+    }
+
     private static DailyBars bars() {
         List<DailyCandle> candles = new ArrayList<>();
         LocalDate date = LocalDate.of(2024, 1, 2);

@@ -30,6 +30,16 @@ class RotationConfigTest {
     }
 
     @Test
+    void parsesDmaPeriodsWithDefaultBlankAndValidation() throws IOException {
+        assertEquals(java.util.List.of(10, 20, 50, 100, 200), load("top.n=3\n").dmaPeriods());
+        assertEquals(java.util.List.of(5, 30), load("market.dma.periods= 5 , 30\n").dmaPeriods());
+        assertTrue(load("market.dma.periods=\n").dmaPeriods().isEmpty());
+        assertThrows(IllegalArgumentException.class, () -> load("market.dma.periods=10,abc\n"));
+        assertThrows(IllegalArgumentException.class, () -> load("market.dma.periods=10,10\n"));
+        assertThrows(IllegalArgumentException.class, () -> load("market.dma.periods=0\n"));
+    }
+
+    @Test
     void acceptsLegacyMomentumKeysAndWarnsWithNamespacedReplacement() throws IOException {
         PrintStream originalError = System.err;
         ByteArrayOutputStream warnings = new ByteArrayOutputStream();

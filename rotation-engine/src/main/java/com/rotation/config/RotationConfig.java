@@ -17,7 +17,7 @@ public final class RotationConfig {
 
     private static final Set<String> COMMON_KEYS = Set.of(
             "strategy", "data.path", "start.date", "end.date", "symbols.file", "sector.file",
-            "market.sector", "output.dir", "output.prefix", "data.validation.mode",
+            "market.sector", "market.dma.periods", "output.dir", "output.prefix", "data.validation.mode",
             "portal.enabled", "verbose");
     private static final Set<String> MOMENTUM_KEYS = Set.of(
             "momentum.lookback.days", "momentum.top.n", "momentum.exit.n",
@@ -152,6 +152,7 @@ public final class RotationConfig {
     public LocalDate startDate() { return common.startDate(); }
     public LocalDate endDate() { return common.endDate(); }
     public String marketSector() { return common.marketSector(); }
+    public List<Integer> dmaPeriods() { return common.dmaPeriods(); }
     public int lookbackDays() { return momentum.lookbackDays(); }
     public int topN() { return momentum.topN(); }
     public int exitN() { return momentum.exitN(); }

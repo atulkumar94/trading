@@ -38,6 +38,30 @@ class DailyMarketSnapshotExporterTest {
     }
 
     @Test
+    void exportsConfiguredDmaColumnsAndReloadRecomputesThem() throws IOException {
+        List<DailyCandle> candles = new java.util.ArrayList<>();
+        for (int i = 0; i < 4; i++) {
+            double close = 10.0 + i;
+            candles.add(new DailyCandle(LocalDate.of(2024, 1, 1).plusDays(i), close, close, close, close, 1));
+        }
+        DailyBars bars = DailyBars.build(List.of(new SymbolDailyCandles("AAA", candles)), false, List.of(2, 3));
+        Path dir = Files.createTempDirectory("snapshot-dma");
+
+        new MarketSnapshotExporter().export(bars, dir, "snapshot");
+        Path daily = dir.resolve("snapshot_daily_market_snapshot.csv");
+        List<String> lines = Files.readAllLines(daily);
+
+        assertTrue(lines.get(0).endsWith(",valid_bar,dma_2,dma_3"));
+        assertTrue(lines.get(1).endsWith(",true,,"));          // first session: no full window
+        assertTrue(lines.get(2).endsWith(",true,10.5,"));      // dma_2 only
+        assertTrue(lines.get(4).endsWith(",true,12.5,12.0"));
+        assertEquals(5, lines.size());
+
+        DailyBars reloaded = DailyBars.build(SnapshotDailyBarLoader.load(daily), false, List.of(2, 3));
+        assertEquals(12.0, reloaded.dmaAt(3, 3, 0), 1e-9);
+    }
+
+    @Test
     void roundTripsVolumeRawCloseAdjustmentAndValidity() throws IOException {
         DailyCandle source = new DailyCandle(LocalDate.of(2024, 1, 2), 50.0, 55.0,
                 45.0, 52.5, 1234.0, 105.0, 0.5, true);

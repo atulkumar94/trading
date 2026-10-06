@@ -91,7 +91,8 @@ The checked-in input currently reports 506 missing/invalid symbol-sessions, 6 la
 jumps, and 4 repeated-bar runs; warn mode does not filter these observations.
 
 The daily snapshot preserves its original first eight columns and appends `volume`,
-`raw_close`, `adjustment_factor`, and `valid_bar`. `SnapshotDailyBarLoader` reads both
+`raw_close`, `adjustment_factor`, `valid_bar`, and `dma_<period>` for each `market.dma.periods`
+value. `SnapshotDailyBarLoader` reads both
 the extended format and older snapshots; absent legacy metadata defaults to unavailable
 volume, raw close equal to adjusted close, factor 1, and valid=true.
 
@@ -102,6 +103,14 @@ On a view, `back=0` is that session and positive offsets read older sessions;
 negative offsets throw, so strategy ranking code has no price accessor for a
 future session. Momentum ranking and first-eligible-signal discovery both use
 views anchored at the signal close.
+
+`DailyBars` stores a simple moving average of the adjusted close (DMA) for each
+`market.dma.periods` value (default 10, 20, 50, 100, 200), computed once when the bars
+are built. `MarketView.dma(symbol, period[, back])` reads it as of the view with the
+same no-lookahead rule as prices; an unconfigured period throws. A DMA is `NaN` until
+`period` consecutive closes exist, and a missing close restarts the window.
+`MarketView.sma` uses the stored DMA for configured periods and falls back to the
+indicator cache otherwise.
 
 The `indicators` package caches values by symbol, indicator, period, and as-of
 session. It supplies close SMA, fractional close-to-close returns, rolling low,

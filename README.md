@@ -98,6 +98,7 @@ All settings live in [rotation-engine/config/rotation.properties](rotation-engin
 | `symbols.file` | Optional CSV with a `symbol` column to restrict the universe |
 | `sector.file` / `momentum.max.per.sector` | Sector diversification cap (default `../symbols.csv`) |
 | `market.sector` | Optional: run on one sector only (e.g. `Healthcare`, case-insensitive, must exist in `sector.file`). Disables `momentum.max.per.sector` |
+| `market.dma.periods` | Comma-separated moving-average periods stored with the daily prices (default `10,20,50,100,200`; blank disables) |
 | `momentum.lookback.days` | Momentum lookback in trading sessions |
 | `momentum.top.n` / `momentum.exit.n` | Names entered / rank threshold before exit |
 | `strategy` | Active signal logic (currently `momentum`) |
@@ -113,8 +114,11 @@ legacy key and its `momentum.*` form are set, the namespaced value wins. Unknown
 with a closest-match suggestion.
 
 The daily market snapshot keeps its existing first eight columns and appends `volume`,
-`raw_close`, `adjustment_factor`, and `valid_bar`. Older snapshots without the appended
-metadata remain readable. `data.validation.mode=warn` (default) reports invalid/missing bars,
+`raw_close`, `adjustment_factor`, and `valid_bar`, followed by one `dma_<period>` column per
+`market.dma.periods` value (simple average of the adjusted close, blank until that many
+consecutive closes exist). The DMAs are recomputed from the closes whenever bars are built,
+so they always cover the full loaded history, including the warm-up before `start.date`.
+Older snapshots without the appended metadata remain readable. `data.validation.mode=warn` (default) reports invalid/missing bars,
 valid close jumps over 50%, and runs of at least three identical valid OHLC bars without
 changing prices; `fail` stops before exporting the snapshot.
 

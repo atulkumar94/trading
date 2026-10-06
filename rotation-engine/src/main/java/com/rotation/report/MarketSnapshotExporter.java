@@ -25,7 +25,8 @@ public final class MarketSnapshotExporter {
         }
 
         List<MarketSnapshotRow> rows = buildRows(bars);
-        writeDailyMarketSnapshot(rows, outputDir.resolve(prefix + "_daily_market_snapshot.csv"));
+        writeDailyMarketSnapshot(rows, bars.dmaPeriods(),
+            outputDir.resolve(prefix + "_daily_market_snapshot.csv"));
     }
 
     private List<MarketSnapshotRow> buildRows(DailyBars bars) {
@@ -57,21 +58,30 @@ public final class MarketSnapshotExporter {
                 double returnPct = Double.isNaN(close) || Double.isNaN(prevClose) || prevClose == 0.0
                     ? Double.NaN : ((close / prevClose) - 1.0) * 100.0;
 
+                double[] dmas = new double[bars.dmaPeriods().size()];
+                for (int p = 0; p < dmas.length; p++) {
+                    dmas[p] = bars.dmaAt(bars.dmaPeriods().get(p), d, i);
+                }
+
                 rows.add(new MarketSnapshotRow(date, symbol, prevClose, open, high, low, close, returnPct,
                     bars.volumeAt(d, i), bars.rawCloseAt(d, i),
-                    bars.adjustmentFactorAt(d, i), bars.validBarAt(d, i)));
+                    bars.adjustmentFactorAt(d, i), bars.validBarAt(d, i), dmas));
             }
         }
 
         return rows;
     }
 
-    private void writeDailyMarketSnapshot(List<MarketSnapshotRow> rows, Path path) {
+    private void writeDailyMarketSnapshot(List<MarketSnapshotRow> rows, List<Integer> dmaPeriods, Path path) {
         try (Writer w = Files.newBufferedWriter(path)) {
-                w.write("date,symbol,prev_close,open,high,low,close,return_vs_prev_close,"
-                    + "volume,raw_close,adjustment_factor,valid_bar\n");
+            StringBuilder header = new StringBuilder("date,symbol,prev_close,open,high,low,close,"
+                    + "return_vs_prev_close,volume,raw_close,adjustment_factor,valid_bar");
+            for (int period : dmaPeriods) {
+                header.append(",dma_").append(period);
+            }
+            w.write(header.append('\n').toString());
             for (MarketSnapshotRow row : rows) {
-                w.write(String.join(",",
+                List<String> cells = new ArrayList<>(List.of(
                         row.date.toString(),
                         row.symbol,
                         price(row.prevClose),
@@ -84,6 +94,10 @@ public final class MarketSnapshotExporter {
                         optionalNumber(row.rawClose),
                         optionalNumber(row.adjustmentFactor),
                         Boolean.toString(row.validBar)));
+                for (double dma : row.dmas) {
+                    cells.add(price(dma));
+                }
+                w.write(String.join(",", cells));
                 w.write("\n");
             }
         } catch (IOException e) {
