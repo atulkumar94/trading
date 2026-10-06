@@ -12,7 +12,7 @@ public final class Main {
     }
 
     public static void main(String[] args) {
-        Path projectRoot = Path.of(System.getProperty("user.dir"));
+        Path projectRoot = resolveProjectRoot(Path.of(System.getProperty("user.dir")));
         Path configFile = projectRoot.resolve("config/rotation.properties");
         boolean dailyRefresh = false;
 
@@ -44,5 +44,17 @@ public final class Main {
     private static Path resolvePath(Path projectRoot, String value) {
         Path candidate = Path.of(value);
         return candidate.isAbsolute() ? candidate : projectRoot.resolve(candidate);
+    }
+
+    /** Resolves the engine root whether launched from the engine folder or the repo root. */
+    private static Path resolveProjectRoot(Path workingDir) {
+        if (Files.exists(workingDir.resolve("config/rotation.properties"))) {
+            return workingDir;
+        }
+        Path engineDir = workingDir.resolve("rotation-engine");
+        if (Files.exists(engineDir.resolve("config/rotation.properties"))) {
+            return engineDir;
+        }
+        return workingDir;
     }
 }
