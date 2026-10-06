@@ -36,7 +36,7 @@ public final class MarketView {
     }
 
     public List<String> symbols() {
-        return List.copyOf(bars.symbols());
+        return bars.symbols();
     }
 
     public int symbolCount() {
@@ -113,7 +113,7 @@ public final class MarketView {
     }
 
     private int symbolIndex(String symbol) {
-        return bars.symbols().indexOf(symbol);
+        return bars.indexOfSymbol(symbol);
     }
 
     private enum PriceField { OPEN, HIGH, LOW, CLOSE }

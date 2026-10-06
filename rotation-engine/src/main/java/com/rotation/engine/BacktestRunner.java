@@ -567,7 +567,7 @@ public final class BacktestRunner {
     }
 
     private static double closeAt(DailyBars bars, int dateIdx, String symbol) {
-        int idx = bars.symbols().indexOf(symbol);
+        int idx = bars.indexOfSymbol(symbol);
         if (idx < 0) {
             return Double.NaN;
         }

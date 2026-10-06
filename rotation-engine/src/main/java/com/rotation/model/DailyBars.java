@@ -20,6 +20,7 @@ public final class DailyBars {
 
     private final List<LocalDate> dates;
     private final List<String> symbols;
+    private final Map<LocalDate, Integer> dateIndex;
     private final Map<String, Integer> symbolIndex;
     private final double[][] opens;   // [dateIdx][symbolIdx]
     private final double[][] highs;   // [dateIdx][symbolIdx]
@@ -36,9 +37,14 @@ public final class DailyBars {
                       double[][] opens, double[][] highs, double[][] lows, double[][] closes,
                       double[][] volumes, double[][] rawCloses, double[][] adjustmentFactors,
                       boolean[][] sourceBars, boolean[][] validBars, int[][] eligibility) {
-        this.dates = dates;
-        this.symbols = symbols;
-        this.symbolIndex = symbolIndex;
+        this.dates = List.copyOf(dates);
+        this.symbols = List.copyOf(symbols);
+        Map<LocalDate, Integer> dateIndex = new HashMap<>();
+        for (int i = 0; i < this.dates.size(); i++) {
+            dateIndex.put(this.dates.get(i), i);
+        }
+        this.dateIndex = Map.copyOf(dateIndex);
+        this.symbolIndex = Map.copyOf(symbolIndex);
         this.opens = opens;
         this.highs = highs;
         this.lows = lows;
@@ -251,7 +257,7 @@ public final class DailyBars {
             }
         }
 
-        return new DailyBars(filteredDates, new ArrayList<>(symbols), new HashMap<>(symbolIndex),
+        return new DailyBars(filteredDates, symbols, symbolIndex,
             opens, highs, lows, closes, volumes, rawCloses, adjustmentFactors, sourceBars, validBars, eligibility);
     }
 
@@ -297,16 +303,30 @@ public final class DailyBars {
             }
         }
 
-        return new DailyBars(filteredDates, new ArrayList<>(symbols), new HashMap<>(symbolIndex),
+        return new DailyBars(filteredDates, symbols, symbolIndex,
             opens, highs, lows, closes, volumes, rawCloses, adjustmentFactors, sourceBars, validBars, eligibility);
     }
 
+    /** Ascending trading dates; unmodifiable. */
     public List<LocalDate> dates() {
         return dates;
     }
 
+    /** Alphabetical symbols; unmodifiable. */
     public List<String> symbols() {
         return symbols;
+    }
+
+    /** Row index for a trading date, or -1 when the date is not a session. */
+    public int indexOfDate(LocalDate date) {
+        Integer idx = dateIndex.get(date);
+        return idx == null ? -1 : idx;
+    }
+
+    /** Column index for a symbol, or -1 when the symbol is not in the universe. */
+    public int indexOfSymbol(String symbol) {
+        Integer idx = symbolIndex.get(symbol);
+        return idx == null ? -1 : idx;
     }
 
     public int symbolCount() {

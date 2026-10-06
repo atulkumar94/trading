@@ -35,7 +35,7 @@ public final class MarketData {
 
     /** Resolve an as-of view for an exact session date. */
     public MarketView asOf(LocalDate date) {
-        int sessionIndex = bars.dates().indexOf(date);
+        int sessionIndex = bars.indexOfDate(date);
         if (sessionIndex < 0) {
             throw new IllegalArgumentException("As-of date is not an aligned market session: " + date);
         }
@@ -44,6 +44,6 @@ public final class MarketData {
 
     /** Resolve the index for engine scheduling and reporting, not price reads. */
     public int indexOf(LocalDate date) {
-        return bars.dates().indexOf(date);
+        return bars.indexOfDate(date);
     }
 }

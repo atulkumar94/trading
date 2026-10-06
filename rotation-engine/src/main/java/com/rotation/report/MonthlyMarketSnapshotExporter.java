@@ -63,9 +63,9 @@ public final class MonthlyMarketSnapshotExporter {
                 LocalDate firstDate = dates.get(0);
                 LocalDate lastDate = dates.get(dates.size() - 1);
 
-                int firstIdx = bars.dates().indexOf(firstDate);
-                int lastIdx = bars.dates().indexOf(lastDate);
-                int symbolIdx = bars.symbols().indexOf(symbol);
+                int firstIdx = bars.indexOfDate(firstDate);
+                int lastIdx = bars.indexOfDate(lastDate);
+                int symbolIdx = bars.indexOfSymbol(symbol);
 
                 double open = bars.openAt(firstIdx, symbolIdx);
                 double high = Double.NEGATIVE_INFINITY;
@@ -87,7 +87,7 @@ public final class MonthlyMarketSnapshotExporter {
                 }
 
                 double prevClose = Double.NaN;
-                int previousMonthIdx = bars.dates().indexOf(firstDate) - 1;
+                int previousMonthIdx = bars.indexOfDate(firstDate) - 1;
                 if (previousMonthIdx >= 0) {
                     prevClose = bars.closeAt(previousMonthIdx, symbolIdx);
                 }

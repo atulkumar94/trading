@@ -55,7 +55,7 @@ public final class BacktestExecution implements ExecutionModel {
 
     @Override
     public StopExecutionResult checkProtectiveStops(LocalDate session, Portfolio portfolio, DailyBars market) {
-        int sessionIdx = market.dates().indexOf(session);
+        int sessionIdx = market.indexOfDate(session);
         if (sessionIdx < 0) {
             throw new IllegalArgumentException("Stop-check session is not present in market data: " + session);
         }
@@ -263,7 +263,6 @@ public final class BacktestExecution implements ExecutionModel {
         if (!exitPolicy.active() || holdings.isEmpty()) {
             return result;
         }
-        List<String> symbols = bars.symbols();
         int lastIdx = dates.size() - 1;
         for (int day = fromIdx; day <= toIdxInclusive; day++) {
             if (holdings.isEmpty()) {
@@ -272,7 +271,7 @@ public final class BacktestExecution implements ExecutionModel {
             int fillIdx = day + 1;
             boolean canFill = fillIdx <= lastIdx;
             for (String symbol : new ArrayList<>(holdings.keySet())) {
-                int col = symbols.indexOf(symbol);
+                int col = bars.indexOfSymbol(symbol);
                 if (col < 0) {
                     continue;
                 }
@@ -330,7 +329,7 @@ public final class BacktestExecution implements ExecutionModel {
     }
 
     private static double openAt(DailyBars bars, int dateIdx, String symbol) {
-        int idx = bars.symbols().indexOf(symbol);
+        int idx = bars.indexOfSymbol(symbol);
         return idx < 0 ? Double.NaN : bars.openAt(dateIdx, idx);
     }
 
